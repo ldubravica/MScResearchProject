@@ -1,0 +1,17 @@
+infodynamics.jar
+
+backup/
+
+Depression_Study/depression_data/
+Depression_Study/examples/
+Depression_Study/export_fif/
+Depression_Study/export_mat/
+Depression_Study/export_test_fif/
+Depression_Study/export_test_mat/
+
+EntRate/
+!EntRate/StateSpaceEntropyRatePerSource.m
+
+fieldtrip-20250423/
+
+infodynamics-dist-1.6.1/

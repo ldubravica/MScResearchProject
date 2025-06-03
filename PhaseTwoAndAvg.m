@@ -1,0 +1,88 @@
+function [cser_values] = PhaseTwoAndAvg()
+    % Define the directory containing the .mat files
+    dataDir = fullfile('Depression_Study', 'export_mat'); % TEST directory
+    files = dir(fullfile(dataDir, '*.mat')); % Get all .mat files in the directory
+
+    cser_open = struct();
+    cser_closed = struct();
+    cser_source_open = struct();
+    cser_source_closed = struct();
+    cser_band_open = struct();
+    cser_band_closed = struct();
+    cser_source_band_open = struct();
+    cser_source_band_closed = struct();
+
+    % Loop through each file
+    for i = 1:length(files)
+        % Load the .mat file
+        fprintf('\n*** PROCESSING FILE: %s *** \n', files(i).name);
+        filePath = fullfile(dataDir, files(i).name);
+
+        % Reconstruct 60 sources from the EEG data
+        fprintf('\n*** RECONSTRUCTING SOURCE *** \n\n');
+        addpath('Source_Reconstruction'); % Add path to Source_Reconstruction folder
+        [source_ts_open, source_ts_closed, aals] = SourceRecon_matlab(filePath);
+
+        % Rotate [trials x sources x time] to [sources x time x trials]
+        fprintf('\n*** ROTATING DATA *** \n');
+        rotated_open = permute(source_ts_open, [2, 3, 1]);
+        rotated_closed = permute(source_ts_closed, [2, 3, 1]);
+
+        % Calculate entropy rate per source & per source per band
+        fprintf('\n*** CALCULATING ENTROPY RATE *** \n');
+        Fs = 500; % Sampling frequency in Hz
+        bands = [1, 4; 4, 8; 8, 12; 12, 30; 30, 100];
+        addpath('EntRate'); % Add path to EntRate folder
+        % H_src_open = StateSpaceEntropyRatePerSource(rotated_open, Fs);
+        % H_src_closed = StateSpaceEntropyRatePerSource(rotated_closed, Fs);
+        [H_src_open, bH_src_open] = StateSpaceEntropyRatePerSource(rotated_open, Fs, 'yes', bands);
+        [H_src_closed, bH_src_closed] = StateSpaceEntropyRatePerSource(rotated_closed, Fs, 'yes', bands);
+
+        % Calculate entropy rate per subject & per subject per band
+        H_open = mean(H_src_open, 'omitnan');
+        H_closed = mean(H_src_closed, 'omitnan');
+        bH_open = mean(bH_src_open, 2, 'omitnan');
+        bH_closed = mean(bH_src_closed, 2, 'omitnan');
+
+        % Store results
+        key = sprintf('x%s', files(i).name(1:3));
+        cser_open.(key) = H_open;
+        cser_closed.(key) = H_closed;
+        cser_source_open.(key) = H_src_open;
+        cser_source_closed.(key) = H_src_closed;
+        cser_band_open.(key) = bH_open;
+        cser_band_closed.(key) = bH_closed;
+        cser_source_band_open.(key) = bH_src_open;
+        cser_source_band_closed.(key) = bH_src_closed;
+        fprintf('\n*** RESULTS SAVED: %s *** \n', files(i).name);
+    end
+
+    % entropy_averages = struct(...
+    %     'entropy_open_average', mean(cell2mat(struct2cell(cser_open)), "omitmissing"), ...
+    %     'entropy_closed_average', mean(cell2mat(struct2cell(cser_closed)), "omitmissing"), ...
+    %     'entropy_band_open_average', mean(cell2mat(struct2cell(cser_band_open)), "omitnan"), ...
+    %     'entropy_band_closed_average', mean(cell2mat(struct2cell(cser_band_closed)), "omitnan"));
+
+    % Save results to .mat files
+    % save(fullfile('entropy_source_open.mat'), 'entropy_source_open');
+    % save(fullfile('entropy_source_closed.mat'), 'entropy_source_closed');
+    % save(fullfile('entropy_source_band_open.mat'), 'entropy_source_band_open');
+    % save(fullfile('entropy_source_band_closed.mat'), 'entropy_source_band_closed');
+
+    % Save all results in a single file
+    save(fullfile('cser_values.mat'), ...
+        'cser_open', 'cser_closed', 'cser_source_open', 'cser_source_closed', ...
+        'cser_band_open', 'cser_band_closed', 'cser_source_band_open', 'cser_source_band_closed');
+
+    cser_values = struct(...
+        'cser_open', cser_open, ...
+        'cser_closed', cser_closed, ...
+        'cser_source_open', cser_source_open, ...
+        'cser_source_closed', cser_source_closed, ...
+        'cser_band_open', cser_band_open, ...
+        'cser_band_closed', cser_band_closed, ...
+        'cser_source_band_open', cser_source_band_open, ...
+        'cser_source_band_closed', cser_source_band_closed);
+
+    fprintf('\n*** FILES SAVED *** \n');
+end
