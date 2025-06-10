@@ -1,7 +1,12 @@
-function [cser_values] = PhaseTwoAndAvg()
-    % Define the directory containing the .mat files
+function [cser_values] = EEGtoCSER()
+
+    % Load directories containing .mat and .m files
+
     dataDir = fullfile('Depression_Study', 'export_mat'); % TEST directory
     files = dir(fullfile(dataDir, '*.mat')); % Get all .mat files in the directory
+
+    addpath('Source_Reconstruction'); % Add path to Source_Reconstruction folder
+    addpath('EntRate'); % Add path to EntRate folder
 
     cser_open = struct();
     cser_closed = struct();
@@ -20,8 +25,7 @@ function [cser_values] = PhaseTwoAndAvg()
 
         % Reconstruct 60 sources from the EEG data
         fprintf('\n*** RECONSTRUCTING SOURCE *** \n\n');
-        addpath('Source_Reconstruction'); % Add path to Source_Reconstruction folder
-        [source_ts_open, source_ts_closed, aals] = SourceRecon_matlab(filePath);
+        [source_ts_open, source_ts_closed, aals] = SourceReconMatlab(filePath);
 
         % Rotate [trials x sources x time] to [sources x time x trials]
         fprintf('\n*** ROTATING DATA *** \n');
@@ -32,7 +36,6 @@ function [cser_values] = PhaseTwoAndAvg()
         fprintf('\n*** CALCULATING ENTROPY RATE *** \n');
         Fs = 500; % Sampling frequency in Hz
         bands = [1, 4; 4, 8; 8, 12; 12, 30; 30, 100];
-        addpath('EntRate'); % Add path to EntRate folder
         % H_src_open = StateSpaceEntropyRatePerSource(rotated_open, Fs);
         % H_src_closed = StateSpaceEntropyRatePerSource(rotated_closed, Fs);
         [H_src_open, bH_src_open] = StateSpaceEntropyRatePerSource(rotated_open, Fs, 'yes', bands);
@@ -57,19 +60,7 @@ function [cser_values] = PhaseTwoAndAvg()
         fprintf('\n*** RESULTS SAVED: %s *** \n', files(i).name);
     end
 
-    % entropy_averages = struct(...
-    %     'entropy_open_average', mean(cell2mat(struct2cell(cser_open)), "omitmissing"), ...
-    %     'entropy_closed_average', mean(cell2mat(struct2cell(cser_closed)), "omitmissing"), ...
-    %     'entropy_band_open_average', mean(cell2mat(struct2cell(cser_band_open)), "omitnan"), ...
-    %     'entropy_band_closed_average', mean(cell2mat(struct2cell(cser_band_closed)), "omitnan"));
-
-    % Save results to .mat files
-    % save(fullfile('entropy_source_open.mat'), 'entropy_source_open');
-    % save(fullfile('entropy_source_closed.mat'), 'entropy_source_closed');
-    % save(fullfile('entropy_source_band_open.mat'), 'entropy_source_band_open');
-    % save(fullfile('entropy_source_band_closed.mat'), 'entropy_source_band_closed');
-
-    % Save all results in a single file
+    % Save all results to a single file
     save(fullfile('cser_values.mat'), ...
         'cser_open', 'cser_closed', 'cser_source_open', 'cser_source_closed', ...
         'cser_band_open', 'cser_band_closed', 'cser_source_band_open', 'cser_source_band_closed');
@@ -85,4 +76,5 @@ function [cser_values] = PhaseTwoAndAvg()
         'cser_source_band_closed', cser_source_band_closed);
 
     fprintf('\n*** FILES SAVED *** \n');
+
 end

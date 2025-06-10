@@ -1,6 +1,6 @@
-function [source_ts_open, source_ts_closed, aals] = SourceRecon_matlab(filename)
+function [source_ts_open, source_ts_closed, aals] = SourceReconMatlab(filename)
 
-%% SourceRecon_matlab
+%% SourceReconMatlab
 % 
 % Perform source reconstruction (beamforming) from epoched data stored in a MATLAB file.
 %

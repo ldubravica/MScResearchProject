@@ -17,7 +17,7 @@ function [cser_source_open, cser_source_closed, cser_source_band_open, cser_sour
         % Reconstruct 60 sources from the EEG data
         fprintf('\n*** RECONSTRUCTING SOURCE *** \n\n');
         addpath('Source_Reconstruction'); % Add path to Source_Reconstruction folder
-        [source_ts_open, source_ts_closed, aals] = SourceRecon_matlab(filePath);
+        [source_ts_open, source_ts_closed, aals] = SourceReconMatlab(filePath);
 
         % Rotating [trials x sources x time] to [sources x time x trials]
         fprintf('\n*** ROTATING DATA *** \n');
@@ -43,13 +43,7 @@ function [cser_source_open, cser_source_closed, cser_source_band_open, cser_sour
         fprintf('\n*** RESULTS SAVED: %s *** \n', files(i).name);
     end
 
-    % Save results to .mat files
-    % save(fullfile('entropy_source_open.mat'), 'entropy_source_open');
-    % save(fullfile('entropy_source_closed.mat'), 'entropy_source_closed');
-    % save(fullfile('entropy_source_band_open.mat'), 'entropy_source_band_open');
-    % save(fullfile('entropy_source_band_closed.mat'), 'entropy_source_band_closed');
-
-    % Save all results in a single file
+    % Export results to cser_values.mat
     save(fullfile('cser_values.mat'), ...
         'cser_source_open', 'cser_source_closed', 'cser_source_band_open', 'cser_source_band_closed');
 

@@ -49,7 +49,7 @@ function [key, H_open, H_closed, bH_open, bH_closed] = processfile(dataDir, file
     % Reconstruct 60 sources from the EEG data
     fprintf('\n*** RECONSTRUCTING SOURCE *** \n\n');
     addpath('Source_Reconstruction'); % Add path to Source_Reconstruction folder
-    [source_ts_open, source_ts_closed, aals] = SourceRecon_matlab(filePath);
+    [source_ts_open, source_ts_closed, aals] = SourceReconMatlab(filePath);
 
     % Rotating [trials x channels x time] to [channels x time x trials]
     fprintf('\n*** ROTATING DATA *** \n');
