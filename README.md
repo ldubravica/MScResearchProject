@@ -10,7 +10,7 @@
 
 **Input:** preprocessed EEG files - Depression_Study\export_mat\###_Depression_REST_processed.mat
 
-**Function:** performs source reconstruction and CSER analysis in MatLab
+**Function:** performs source reconstruction and CSER calculation in MatLab
 
 **Output:** CSER values per subject / source / band - cser_values.mat
 
