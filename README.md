@@ -1,14 +1,14 @@
 ### Phase One: Depression_Study\phase_one_raw.ipynb
 
-**Input:** depression EEG study files - Depression_Study\depression_data\matlab_files\###_Depression_REST.mat
+**Input:** depression EEG study files - Depression_Study\depression_data\matlab_files\XXX_Depression_REST.mat
 
 **Function:** preprocceses the EEG in Python
 
-**Output:** clean and filtered EEG per subject - Depression_Study\export_mat\###_Depression_REST_processed.mat
+**Output:** clean and filtered EEG per subject - Depression_Study\export_mat\XXX_Depression_REST_processed.mat
 
 ### Phase Two: EEGtoCSER.m (replacing PhaseTwo.m and CalcAvgER.m combination)
 
-**Input:** preprocessed EEG files - Depression_Study\export_mat\###_Depression_REST_processed.mat
+**Input:** preprocessed EEG files - Depression_Study\export_mat\XXX_Depression_REST_processed.mat
 
 **Function:** performs source reconstruction and CSER calculation in MatLab
 
