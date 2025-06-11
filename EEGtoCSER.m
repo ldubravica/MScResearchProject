@@ -1,4 +1,4 @@
-function [cser_values] = EEGtoCSER()
+function [cser_values, eeg_source, aals] = EEGtoCSER()
 
     % Load directories containing .mat and .m files
 
@@ -16,6 +16,9 @@ function [cser_values] = EEGtoCSER()
     cser_band_closed = struct();
     cser_source_band_open = struct();
     cser_source_band_closed = struct();
+
+    eeg_source_open = struct();
+    eeg_source_closed = struct();
 
     % Loop through each file
     for i = 1:length(files)
@@ -49,22 +52,32 @@ function [cser_values] = EEGtoCSER()
 
         % Store results
         key = sprintf('x%s', files(i).name(1:3));
+
         cser_open.(key) = H_open;
         cser_closed.(key) = H_closed;
         cser_source_open.(key) = H_src_open;
         cser_source_closed.(key) = H_src_closed;
-        cser_band_open.(key) = bH_open;
-        cser_band_closed.(key) = bH_closed;
+        cser_band_open.(key) = bH_open';
+        cser_band_closed.(key) = bH_closed';
         cser_source_band_open.(key) = bH_src_open;
         cser_source_band_closed.(key) = bH_src_closed;
+
+        eeg_source_open.(key) = source_ts_open;
+        eeg_source_closed.(key) = source_ts_closed;
+
         fprintf('\n*** RESULTS SAVED: %s *** \n', files(i).name);
     end
 
-    % Save all results to a single file
+    % Save results into .mat files
     save(fullfile('cser_values.mat'), ...
         'cser_open', 'cser_closed', 'cser_source_open', 'cser_source_closed', ...
-        'cser_band_open', 'cser_band_closed', 'cser_source_band_open', 'cser_source_band_closed');
+        'cser_band_open', 'cser_band_closed', 'cser_source_band_open', 'cser_source_band_closed', ...
+        'aals');
 
+    save(fullfile('eeg_source.mat'), ...
+        'source_ts_open', 'source_ts_closed', 'aals');
+
+    % Save results in a structured format for return
     cser_values = struct(...
         'cser_open', cser_open, ...
         'cser_closed', cser_closed, ...
@@ -74,6 +87,10 @@ function [cser_values] = EEGtoCSER()
         'cser_band_closed', cser_band_closed, ...
         'cser_source_band_open', cser_source_band_open, ...
         'cser_source_band_closed', cser_source_band_closed);
+    
+    eeg_source = struct(...
+        'eeg_source_open', eeg_source_open, ...
+        'eeg_source_closed', eeg_source_closed);
 
     fprintf('\n*** FILES SAVED *** \n');
 
