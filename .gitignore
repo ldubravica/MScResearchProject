@@ -15,3 +15,7 @@ EntRate/
 fieldtrip-20250423/
 
 infodynamics-dist-1.6.1/
+
+eeg_source.mat
+eeg_source_single.mat
+eeg_source_single_rotated.mat

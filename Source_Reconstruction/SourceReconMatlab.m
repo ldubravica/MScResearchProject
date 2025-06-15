@@ -15,7 +15,7 @@ function [source_ts_open, source_ts_closed, aals] = SourceReconMatlab(filename)
 %   source_ts_closed -- [n_epochs_closed × n_sources × n_times]
 %   aals             -- {n_sources×1 cell}, names of selected AAL regions
 %
-% Pedro Mediano, Hardik Rajpal, Modified 2025
+% Pedro Mediano, Hardik Rajpal, Luka Dubravica, Modified 2025
 
 %% Defining the ROIs to select
 Frontal = [3:16, 19:20, 23:26];
