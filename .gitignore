@@ -9,7 +9,7 @@ Depression_Study/export_mat/
 Depression_Study/export_test_fif/
 Depression_Study/export_test_mat/
 
-EntRate/
+EntRate/*
 !EntRate/StateSpaceEntropyRatePerSource.m
 
 fieldtrip-20250423/
