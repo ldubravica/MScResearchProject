@@ -13,7 +13,7 @@ function [H, band_H] = StateSpaceEntropyRatePerSource(X, Fs, downsampling, band,
 %   H           	- Entropy rate per source (1xD vector).
 %   band_H      	- Entropy rate decomposed into frequency bands per source (optional).
 %
-% Pedro Mediano, Modified 2025
+% Pedro Mediano, Luka Dubravica, Modified 2025
 
 
 %% Parameter checks and initialisation
@@ -44,11 +44,6 @@ if nargout < 2 && ~isempty(band)
         'please use\\[H, band_H] = StateSpaceEntropyRatePerSource(...)']);
 end
 
-% Standardize the data
-% X = demean(X, true);
-% Remove the mean across the 2nd dimension (time) for each source and trial
-X = X - mean(X, 2);
-
 
 %% Load Octave and MVGC
 
@@ -64,6 +59,9 @@ evalc('mvgc_startup;');
 
 
 %% Loop over sources and compute entropy rate
+
+% Standardize the data
+X = demean(X, true);
 
 H = nan(1, D);  % Initialize vector to store entropy rate per source
 band_H = nan(size(band,1), D); % Initialize band_H to NaN per source per band
