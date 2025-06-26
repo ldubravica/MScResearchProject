@@ -1,5 +1,9 @@
 infodynamics.jar
 
+eeg_source.mat
+eeg_source_single.mat
+eeg_source_single_rotated.mat
+
 backup/
 
 Depression_Study/depression_data/
@@ -17,10 +21,8 @@ fieldtrip-20250423/
 
 infodynamics-dist-1.6.1/
 
-eeg_source.mat
-eeg_source_single.mat
-eeg_source_single_rotated.mat
-
 lz76/*
 !lz76/lz76.pyx
 !lz76/setup.py
+
+output/
