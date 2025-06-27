@@ -17,6 +17,8 @@ EntRate/*
 !EntRate/StateSpaceEntropyRate.m
 !EntRate/StateSpaceEntropyRatePerSource.m
 
+examples/
+
 fieldtrip-20250423/
 
 infodynamics-dist-1.6.1/
