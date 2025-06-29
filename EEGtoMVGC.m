@@ -15,8 +15,14 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
 
     %% Initialize variables
 
-    mvgc_open = struct();
-    mvgc_closed = struct();
+    pwcgc_open = struct();
+    pwcgc_closed = struct();
+
+    spwcgc_open = struct();
+    spwcgc_closed = struct();
+
+    spwcgc_bands_open = struct();
+    spwcgc_bands_closed = struct();
 
     region_names = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
 
@@ -26,7 +32,7 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
     sensorimotor = [1,2,17,18,37,38];
     temporal = [51:60];
 
-    LOAD_MVGC_FILE = true;
+    LOAD_MVGC_FILE = false;
 
     %% Perform source reconstruction, rotation and CSER calculation for each subject
 
@@ -51,12 +57,152 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
 
             % Calculate and store MVGC for each subject's data
             fprintf('\n*** CALCULATING MVGC %s - (%i/%i) *** \n', files(i).name(1:3), i, length(files));
-            mvgc_open.(key) = calculateMVGC(subj_open);
-            mvgc_closed.(key) = calculateMVGC(subj_closed);
+            [pwcgc_values_open, spwcgc_values_open, spwcgc_bands_values_open] = calculateMVGC(subj_open);
+            [pwcgc_values_closed, spwcgc_values_closed, spwcgc_bands_values_closed] = calculateMVGC(subj_closed);
+
+            mvgc_open.(key) = pwcgc_values_open;
+            mvgc_closed.(key) = pwcgc_values_closed;
+
+            % pwcgc_open.(key) = pwcgc_values_open;
+            % pwcgc_closed.(key) = pwcgc_values_closed;
+
+            spwcgc_open.(key) = spwcgc_values_open;
+            spwcgc_closed.(key) = spwcgc_values_closed;
+
+            spwcgc_bands_open.(key) = spwcgc_bands_values_open;
+            spwcgc_bands_closed.(key) = spwcgc_bands_values_closed;
 
             fprintf('\n*** RESULTS SAVED: %s *** \n', files(i).name);
         end
     
+    end
+
+    %% Function to calculate MVGC for a given subject's data
+
+    function [pwcgc_values, spwcgc_values, bands_values] = calculateMVGC(subj_data)
+
+        % Reconstruct 5 regions out of 60 sources
+        frontal_data = subj_data(frontal, :, :);  % 20 srcs * 2000 samples * trials
+        occipital_data = subj_data(occipital, :, :);  % 12 srcs * 2000 samples * trials
+        parietal_data = subj_data(parietal, :, :);  % 12 srcs * 2000 samples * trials
+        sensorimotor_data = subj_data(sensorimotor, :, :);  % 6 srcs * 2000 samples * trials
+        temporal_data = subj_data(temporal, :, :);  % 10 srcs * 2000 samples * trials
+
+        num_regions = 5;
+        [~, num_samples, num_trials] = size(frontal_data);
+        regional_eeg = zeros(num_regions, num_samples, num_trials);  % [regions x samples x trials]
+
+        regional_eeg(1, :, :) = squeeze(mean(frontal_data, 1));  % [samples x trials]
+        regional_eeg(2, :, :) = squeeze(mean(occipital_data, 1));
+        regional_eeg(3, :, :) = squeeze(mean(parietal_data, 1));
+        regional_eeg(4, :, :) = squeeze(mean(sensorimotor_data, 1));
+        regional_eeg(5, :, :) = squeeze(mean(temporal_data, 1));
+
+        %% Calculate MVGC between regions
+
+        X = regional_eeg;  % [regions x samples x trials]
+
+        % VAR model order estimation
+        max_var_order = 20;  % reasonable maximum (has to be less than nobs)
+        fprintf('\nEstimating VAR model order (max order = %d)...\n', max_var_order);
+        % [varmoaic, varmobic, varmohqc, varmolrt] = tsdata_to_varmo(y, varmomax, 'LWR', [], false);
+        [varmo_aic, ~, ~, ~] = tsdata_to_varmo(X, max_var_order, 'LWR');
+        varmo = find(varmo_aic == min(varmo_aic), 1); % Select best AIC order
+        fprintf('Selected VAR model order (AIC): %d\n', varmo);
+
+        % State-space model order estimation using SVC (faster)
+        fprintf('Estimating state-space model order using SVC...\n');
+        [ssmo_svc, ~] = tsdata_to_sssvc(X, 2*varmo, [], []);
+        % [ssmo_svc, ssmo_max] = tsdata_to_ssmo(X, 2*varmo, 0);
+        ssmo = ssmo_svc;
+        fprintf('Selected state-space model order (SVC): %d\n', ssmo);
+
+        % Estimate SS model
+        fprintf('Estimating state-space model parameters...\n');
+        [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
+        info = ss_info(A, C, K, V, 0);
+        fprintf('\nState-space model information:\n');
+        fprintf('  Observables: %d\n', info.observ);
+        fprintf('  Model order: %d\n', info.morder);
+        fprintf('  Rho A: %.4f\n', info.rhoA);
+        fprintf('  Rho B: %.4f\n', info.rhoB);
+        fprintf('  Autocovariance decay: %d\n', info.acdec);
+        fprintf('  Sigma SPD: %d\n', info.sigspd);
+        fprintf('  Multi-information: %.4f\n', info.mii);
+        fprintf('  Multi-information (uniform): %.4f\n', info.mmii);
+        if info.error
+            fprintf('State-space model estimation encountered errors.\n');
+            return;
+        else
+            fprintf('State-space model estimation successful (with no errors).\n\n');
+        end
+
+        % Compute time-domain pairwise conditional GC
+        fprintf('Computing time-domain pairwise conditional MVGC... (1/2)\n');
+        pwcgc_values = ss_to_pwcgc(A, C, K, V);
+
+        % Compute spectral pairwise conditional GC
+        fprintf('Computing spectral pairwise conditional GC... (2/2)\n');
+        fres = 200;  % frequency resolution
+        spwcgc_values = ss_to_spwcgc(A, C, K, V, fres);  % [nvars x nvars x fres]
+        bands_values = compute_band_gc(spwcgc_values, 200, fres);
+        
+        fprintf('\nMVGC computation complete.\n');
+
+        % Validate result
+        if isbad(pwcgc_values, false)
+            error('pwcgc_values estimation failed');
+        end
+
+        if isbad(spwcgc_values, false)
+            error('spwcgc_values estimation failed');
+        end
+
+        % Print mvgc contents
+        fprintf('\npwcgc_values contents:\n\n');
+        disp(pwcgc_values);
+
+        fprintf('\nbands_values.delta contents:\n\n');
+        disp(bands_values.delta);
+
+        fprintf('\nbands_values.theta contents:\n\n');
+        disp(bands_values.theta);
+
+        fprintf('\nbands_values.alpha contents:\n\n');
+        disp(bands_values.alpha);
+
+        fprintf('\nbands_values.beta contents:\n\n');
+        disp(bands_values.beta);
+
+        fprintf('\nbands_values.gamma contents:\n\n');
+        disp(bands_values.gamma);
+
+    end
+
+    function band_gc = compute_band_gc(gc_spectral, fs, fres)
+
+        % Frequency vector (0 to Nyquist)
+        nyq = fs / 2;
+        freqs = linspace(0, nyq, fres + 1);
+
+        % Define frequency bands (in Hz)
+        bands = struct( ...
+            'delta', [0.5 4], ...
+            'theta', [4 8], ...
+            'alpha', [8 13], ...
+            'beta',  [13 30], ...
+            'gamma', [30 80] ...
+        );
+
+        band_names = fieldnames(bands);
+
+        % Loop through each band and average across frequency indices
+        for b = 1:numel(band_names)
+            band = band_names{b};
+            range = bands.(band);
+            idx = freqs >= range(1) & freqs <= range(2);
+            band_gc.(band) = mean(gc_spectral(:, :, idx), 3);
+        end
     end
 
     %% Load MVGC results from mvgc_values.mat
@@ -115,54 +261,32 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
 
     fprintf('\n*** AVERAGING MVGC ACROSS SUBJECTS *** \n');
 
-    % Initialize matrices to accumulate MVGC values for healthy and depressed groups
-    mvgc_open_healthy_avg = zeros(length(region_names), length(region_names));
-    mvgc_open_depressed_avg = zeros(length(region_names), length(region_names));
-    mvgc_closed_healthy_avg = zeros(length(region_names), length(region_names));
-    mvgc_closed_depressed_avg = zeros(length(region_names), length(region_names));
-
-    % Count subjects in each group
-    open_healthy_count = 0;
-    open_depressed_count = 0;
-    closed_healthy_count = 0;
-    closed_depressed_count = 0;
-
-    % Loop through each subject's MVGC results for open
-    for i = 1:length(files)
-        key = sprintf('x%s', files(i).name(1:3));
-        if isfield(mvgc_open_healthy, key)
-            mvgc_open_healthy_avg = mvgc_open_healthy_avg + mvgc_open_healthy.(key);
-            open_healthy_count = open_healthy_count + 1;
+    % Helper function to average MVGC matrices in a struct
+    function avg_mat = average_mvgc_struct(mvgc_struct)
+        avg_mat = zeros(length(region_names), length(region_names));
+        count = 0;
+        for i = 1:length(files)
+            key = sprintf('x%s', files(i).name(1:3));
+            if isfield(mvgc_struct, key)
+                avg_mat = avg_mat + mvgc_struct.(key);
+                count = count + 1;
+            end
         end
-        if isfield(mvgc_open_depressed, key)
-            mvgc_open_depressed_avg = mvgc_open_depressed_avg + mvgc_open_depressed.(key);
-            open_depressed_count = open_depressed_count + 1;
-        end
-        if isfield(mvgc_closed_healthy, key)
-            mvgc_closed_healthy_avg = mvgc_closed_healthy_avg + mvgc_closed_healthy.(key);
-            closed_healthy_count = closed_healthy_count + 1;
-        end
-        if isfield(mvgc_closed_depressed, key)
-            mvgc_closed_depressed_avg = mvgc_closed_depressed_avg + mvgc_closed_depressed.(key);
-            closed_depressed_count = closed_depressed_count + 1;
+        if count > 0
+            avg_mat = avg_mat / count;
         end
     end
 
-    % Average the MVGC values for each group (avoid division by zero)
-    if open_healthy_count > 0
-        mvgc_open_healthy_avg = mvgc_open_healthy_avg / open_healthy_count;
-    end
-    if open_depressed_count > 0
-        mvgc_open_depressed_avg = mvgc_open_depressed_avg / open_depressed_count;
-    end
-    if closed_healthy_count > 0
-        mvgc_closed_healthy_avg = mvgc_closed_healthy_avg / closed_healthy_count;
-    end
-    if closed_depressed_count > 0
-        mvgc_closed_depressed_avg = mvgc_closed_depressed_avg / closed_depressed_count;
-    end
+    mvgc_open_healthy_avg = average_mvgc_struct(mvgc_open_healthy);
+    mvgc_open_depressed_avg = average_mvgc_struct(mvgc_open_depressed);
+    mvgc_closed_healthy_avg = average_mvgc_struct(mvgc_closed_healthy);
+    mvgc_closed_depressed_avg = average_mvgc_struct(mvgc_closed_depressed);
 
-    % Display average MVGC matrices
+    mvgc_open_avg = (mvgc_open_healthy_avg + mvgc_open_depressed_avg) / 2;
+    mvgc_closed_avg = (mvgc_closed_healthy_avg + mvgc_closed_depressed_avg) / 2;
+    mvgc_healthy_avg = (mvgc_open_healthy_avg + mvgc_closed_healthy_avg) / 2;
+    mvgc_depressed_avg = (mvgc_open_depressed_avg + mvgc_closed_depressed_avg) / 2;
+
     fprintf('\n*** AVERAGE MVGC OPEN HEALTHY *** \n');
     disp(mvgc_open_healthy_avg);
     fprintf('\n*** AVERAGE MVGC OPEN DEPRESSED *** \n');
@@ -171,16 +295,6 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
     disp(mvgc_closed_healthy_avg);
     fprintf('\n*** AVERAGE MVGC CLOSED DEPRESSED *** \n');
     disp(mvgc_closed_depressed_avg);
-
-    %% Average MVGC across open/closed subjects and healthy/depressed subjects separately
-
-    fprintf('\n*** AVERAGING MVGC ACROSS OPEN/CLOSED AND HEALTHY/DEPRESSED SUBJECTS SEPARATELY *** \n');
-    mvgc_open_avg = (mvgc_open_healthy_avg + mvgc_open_depressed_avg) / 2;
-    mvgc_closed_avg = (mvgc_closed_healthy_avg + mvgc_closed_depressed_avg) / 2;
-    mvgc_healthy_avg = (mvgc_open_healthy_avg + mvgc_closed_healthy_avg) / 2;
-    mvgc_depressed_avg = (mvgc_open_depressed_avg + mvgc_closed_depressed_avg) / 2;
-
-    % Display average MVGC matrices
     fprintf('\n*** AVERAGE MVGC OPEN *** \n');
     disp(mvgc_open_avg);
     fprintf('\n*** AVERAGE MVGC CLOSED *** \n');
@@ -189,109 +303,47 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
     disp(mvgc_healthy_avg);
     fprintf('\n*** AVERAGE MVGC DEPRESSED *** \n');
     disp(mvgc_depressed_avg);
-    
 
     %% Plot average MVGC matrices across open/closed healthy/depressed subjects
+    plot_mvgc_matrix_grid(...
+        {mvgc_open_healthy_avg, mvgc_open_depressed_avg, mvgc_closed_healthy_avg, mvgc_closed_depressed_avg}, ...
+        region_names, ...
+        {'Open Healthy', 'Open Depressed', 'Closed Healthy', 'Closed Depressed'}, ...
+        'Average MVGC Matrices');
 
-    % Find global min and max for color scaling
-    all_mvgc = [mvgc_open_healthy_avg(:); mvgc_open_depressed_avg(:); ...
-                mvgc_closed_healthy_avg(:); mvgc_closed_depressed_avg(:)];
-    clim = [min(all_mvgc), max(all_mvgc)];
+    plot_mvgc_matrix_grid(...
+        {mvgc_open_avg, mvgc_closed_avg, mvgc_healthy_avg, mvgc_depressed_avg}, ...
+        region_names, ...
+        {'Open', 'Closed', 'Healthy', 'Depressed'}, ...
+        'Average MVGC Matrices');
 
-    figure;
+    function plot_mvgc_matrix_grid(mvgc_matrices, region_names, titles, super_title)
+        % mvgc_matrices: cell array of 4 matrices
+        % region_names: cell array of region names
+        % titles: cell array of 4 subplot titles
+        % super_title: string for sgtitle
 
-    subplot(2, 2, 1);
-    imagesc(mvgc_open_healthy_avg, clim);
-    colorbar;
-    title('Average MVGC - Open Healthy');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
+        % Find global color limits
+        all_vals = [];
+        for i = 1:numel(mvgc_matrices)
+            all_vals = [all_vals; mvgc_matrices{i}(:)];
+        end
+        clim = [min(all_vals), max(all_vals)];
 
-    subplot(2, 2, 2);
-    imagesc(mvgc_open_depressed_avg, clim);
-    colorbar;
-    title('Average MVGC - Open Depressed');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
-
-    subplot(2, 2, 3);
-    imagesc(mvgc_closed_healthy_avg, clim);
-    colorbar;
-    title('Average MVGC - Closed Healthy');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
-
-    subplot(2, 2, 4);
-    imagesc(mvgc_closed_depressed_avg, clim);
-    colorbar;
-    title('Average MVGC - Closed Depressed');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
-
-    sgtitle('Average MVGC Matrices');
-
-    %% Plot average MVGC matrices across open/closed and healthy/depressed subjects separately
-
-    % Find global min and max for color scaling
-    all_mvgc = [mvgc_open_avg(:); mvgc_closed_avg(:); ...
-                mvgc_healthy_avg(:); mvgc_depressed_avg(:)];
-    clim = [min(all_mvgc), max(all_mvgc)];
-
-    figure;
-
-    subplot(2, 2, 1);
-    imagesc(mvgc_open_avg, clim);
-    colorbar;
-    title('Average MVGC - Open');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
-
-    subplot(2, 2, 2);
-    imagesc(mvgc_closed_avg, clim);
-    colorbar;
-    title('Average MVGC - Closed');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
-
-    subplot(2, 2, 3);
-    imagesc(mvgc_healthy_avg, clim);
-    colorbar;
-    title('Average MVGC - Healthy');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
-
-    subplot(2, 2, 4);
-    imagesc(mvgc_depressed_avg, clim);
-    colorbar;
-    title('Average MVGC - Depressed');
-    set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-             'YTick', 1:length(region_names), 'YTickLabel', region_names);
-    xlabel('To Region');
-    ylabel('From Region');
-    axis square;
-
-    sgtitle('Average MVGC Matrices');
+        figure;
+        for i = 1:4
+            subplot(2,2,i);
+            imagesc(mvgc_matrices{i}, clim);
+            colorbar;
+            title(sprintf('Average MVGC - %s', titles{i}));
+            set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
+                     'YTick', 1:length(region_names), 'YTickLabel', region_names);
+            xlabel('To Region');
+            ylabel('From Region');
+            axis square;
+        end
+        sgtitle(super_title);
+    end
 
     %% Save results into .mat files
 
@@ -301,88 +353,11 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
          'mvgc_closed_healthy', 'mvgc_closed_depressed', ...
          'mvgc_open_healthy_avg', 'mvgc_open_depressed_avg', ...
          'mvgc_closed_healthy_avg', 'mvgc_closed_depressed_avg');
+    
+    save(fullfile('spwcgc_values.mat'), ...
+         'spwcgc_open', 'spwcgc_closed', ...
+         'spwcgc_bands_open', 'spwcgc_bands_closed');
 
     fprintf('\n*** FILES SAVED *** \n');
-
-    %% Function to calculate MVGC for a given subject's data
-
-    function [mvgc_values] = calculateMVGC(subj_data)
-
-        % Reconstruct 5 regions out of 60 sources
-        frontal_data = subj_data(frontal, :, :);  % 20 srcs * 2000 samples * trials
-        occipital_data = subj_data(occipital, :, :);  % 12 srcs * 2000 samples * trials
-        parietal_data = subj_data(parietal, :, :);  % 12 srcs * 2000 samples * trials
-        sensorimotor_data = subj_data(sensorimotor, :, :);  % 6 srcs * 2000 samples * trials
-        temporal_data = subj_data(temporal, :, :);  % 10 srcs * 2000 samples * trials
-
-        num_regions = 5;
-        [~, num_samples, num_trials] = size(frontal_data);
-        regional_eeg = zeros(num_regions, num_samples, num_trials);  % [regions x samples x trials]
-
-        regional_eeg(1, :, :) = squeeze(mean(frontal_data, 1));  % [samples x trials]
-        regional_eeg(2, :, :) = squeeze(mean(occipital_data, 1));
-        regional_eeg(3, :, :) = squeeze(mean(parietal_data, 1));
-        regional_eeg(4, :, :) = squeeze(mean(sensorimotor_data, 1));
-        regional_eeg(5, :, :) = squeeze(mean(temporal_data, 1));
-
-        % %% Calculate MVGC between regions (needs a further breakdown)
-
-        % % Select VAR model order
-        % [varmoaic, varmobic, varmohqc, varmolrt] = tsdata_to_varmo(y, varmomax, 'LWR', [], false);
-
-        % % Select SS model order
-        % if varmohqc < 1
-        %     % Force the algorithm to fit a SS model even if varmo gives up
-        %     varmohqc = 1;
-        %     ssmo = 2;
-        % else
-        %     [ssmo, ~] = tsdata_to_sssvc(y, 2*varmohqc, [], []);
-        % end
-
-        % % Fit SS model
-        % [A, C, K, V] = tsdata_to_ss(y, 2*varmohqc, ssmo);
-        % info = ss_info(A, C, K, V, 0);
-        % F = ss_to_mvgc(A,C,K,V,x,y);
-
-        X = regional_eeg;  % [regions x samples x trials]
-
-        % Set parameters
-        nvars = size(X, 1);       % should be 5
-        nobs = size(X, 2);        % should be 2000
-        ntrials = size(X, 3);
-        fs = 200;                 % Sampling rate
-
-        % VAR model order estimation
-        max_var_order = 20;       % reasonable maximum (has to be less than nobs)
-        fprintf('\nEstimating VAR model order (max order = %d)...\n', max_var_order);
-        [varmo_aic, ~, ~, ~] = tsdata_to_varmo(X, max_var_order, 'LWR');
-        varmo = find(varmo_aic == min(varmo_aic), 1); % Select best AIC order
-        fprintf('Selected VAR model order (AIC): %d\n', varmo);
-
-        % State-space model order estimation using SVC (faster)
-        fprintf('Estimating state-space model order using SVC...\n');
-        [ssmo_svc, ~] = tsdata_to_sssvc(X, 2*varmo, [], []);
-        ssmo = ssmo_svc;
-        fprintf('Selected state-space model order (SVC): %d\n', ssmo);
-
-        % Estimate SS model
-        fprintf('Estimating state-space model parameters...\n');
-        [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
-
-        % Compute time-domain pairwise conditional GC
-        fprintf('Computing time-domain pairwise conditional MVGC...\n');
-        mvgc_values = ss_to_pwcgc(A, C, K, V);
-        fprintf('\nMVGC computation complete.\n');
-
-        % Validate result
-        if isbad(mvgc_values, false)
-            error('GC estimation failed');
-        end
-
-        % Print mvgc_values's size and contents
-        fprintf('\nmvgc_values contents:\n\n');
-        disp(mvgc_values);
-
-    end
 
 end
