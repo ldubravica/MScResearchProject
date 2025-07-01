@@ -109,10 +109,17 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
 
         %% Calculate MVGC between regions
 
+        % Z-score each region across time for each trial
+        for trial = 1:size(regional_eeg, 3)
+            for region = 1:size(regional_eeg, 1)
+                regional_eeg(region, :, trial) = zscore(regional_eeg(region, :, trial));
+            end
+        end
+
         X = regional_eeg;  % [regions x samples x trials]
 
         % VAR model order estimation
-        varmomax = 20;  % has to be less than nobs
+        varmomax = 32;  % has to be less than nobs
         varmosel = 'AIC';
         fprintf('\nEstimating VAR model order (max order = %d)...\n', varmomax);
         [varmoaic, varmobic, varmohqc, varmolrt] = tsdata_to_varmo(X, varmomax, 'LWR', [], []);
@@ -130,18 +137,18 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
         fprintf('Estimating state-space model parameters...\n');
         [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
         info = ss_info(A, C, K, V, 1);
-        fprintf('\nState-space model information:\n');
-        fprintf('  Observables: %d\n', info.observ);
-        fprintf('  Model order: %d\n', info.morder);
-        fprintf('  Rho A: %.4f\n', info.rhoA);
-        fprintf('  Rho B: %.4f\n', info.rhoB);
-        fprintf('  Autocovariance decay: %d\n', info.acdec);
+        % fprintf('\nState-space model information:\n');
+        % fprintf('  Observables: %d\n', info.observ);
+        % fprintf('  Model order: %d\n', info.morder);
+        % fprintf('  Rho A: %.4f\n', info.rhoA);
+        % fprintf('  Rho B: %.4f\n', info.rhoB);
+        % fprintf('  Autocovariance decay: %d\n', info.acdec);
         fprintf('  Sigma SPD: %d\n', info.sigspd);
-        fprintf('  Multi-information: %.4f\n', info.mii);
-        fprintf('  Multi-information (uniform): %.4f\n', info.mmii);
+        % fprintf('  Multi-information: %.4f\n', info.mii);
+        % fprintf('  Multi-information (uniform): %.4f\n', info.mmii);
         if info.error
             fprintf('State-space model estimation encountered errors.\n');
-            fprintf('Error code: %d\n', info.error);
+            % fprintf('Error code: %d\n', info.error);
             % return;
         else
             fprintf('State-space model estimation successful (no errors).\n\n');
@@ -152,10 +159,12 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
         pwcgc_values = ss_to_pwcgc(A, C, K, V);
 
         % Compute spectral pairwise conditional GC
-        fprintf('Computing spectral pairwise conditional GC... (2/2)\n');
-        fres = 200;  % frequency resolution
-        spwcgc_values = ss_to_spwcgc(A, C, K, V, fres);  % [nvars x nvars x fres]
-        bands_values = compute_band_gc(spwcgc_values, 200, fres);
+        % fprintf('Computing spectral pairwise conditional GC... (2/2)\n');
+        % fres = 200;  % frequency resolution
+        % spwcgc_values = ss_to_spwcgc(A, C, K, V, fres);  % [nvars x nvars x fres]
+        % bands_values = compute_band_gc(spwcgc_values, 200, fres);
+        spwcgc_values = struct();
+        bands_values = struct();
         
         fprintf('\nMVGC computation complete.\n');
 
@@ -164,28 +173,28 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
             error('pwcgc_values estimation failed');
         end
 
-        if isbad(spwcgc_values, false)
-            error('spwcgc_values estimation failed');
-        end
+        % if isbad(spwcgc_values, false)
+        %     error('spwcgc_values estimation failed');
+        % end
 
         % Print mvgc contents
         fprintf('\npwcgc_values contents:\n\n');
         disp(pwcgc_values);
 
-        fprintf('\nbands_values.delta contents:\n\n');
-        disp(bands_values.delta);
+        % fprintf('\nbands_values.delta contents:\n\n');
+        % disp(bands_values.delta);
 
-        fprintf('\nbands_values.theta contents:\n\n');
-        disp(bands_values.theta);
+        % fprintf('\nbands_values.theta contents:\n\n');
+        % disp(bands_values.theta);
 
-        fprintf('\nbands_values.alpha contents:\n\n');
-        disp(bands_values.alpha);
+        % fprintf('\nbands_values.alpha contents:\n\n');
+        % disp(bands_values.alpha);
 
-        fprintf('\nbands_values.beta contents:\n\n');
-        disp(bands_values.beta);
+        % fprintf('\nbands_values.beta contents:\n\n');
+        % disp(bands_values.beta);
 
-        fprintf('\nbands_values.gamma contents:\n\n');
-        disp(bands_values.gamma);
+        % fprintf('\nbands_values.gamma contents:\n\n');
+        % disp(bands_values.gamma);
 
     end
 
@@ -366,7 +375,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
     
     save(fullfile('spwcgc_values.mat'), ...
          'spwcgc_open', 'spwcgc_closed', ...
-         'spwcgc_bands_open', 'spwcgc_bands_closed');
+         'bands_open', 'bands_closed');
 
     fprintf('\n*** FILES SAVED *** \n');
 
