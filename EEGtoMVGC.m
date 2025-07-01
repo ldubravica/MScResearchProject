@@ -1,4 +1,4 @@
-function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
+function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
 
     %% Load .mat and .m files
 
@@ -15,14 +15,20 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
 
     %% Initialize variables
 
+    mvgc_open = struct();
+    mvgc_closed = struct();
+
     pwcgc_open = struct();
     pwcgc_closed = struct();
 
     spwcgc_open = struct();
     spwcgc_closed = struct();
 
-    spwcgc_bands_open = struct();
-    spwcgc_bands_closed = struct();
+    bands_open = struct();
+    bands_closed = struct();
+
+    ss_info_open = struct();
+    ss_info_closed = struct();
 
     region_names = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
 
@@ -49,7 +55,7 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
             % Reconstruct 60 sources from the EEG data
             fprintf('\n*** RECONSTRUCTING SOURCE *** \n\n');
             [source_ts_open, source_ts_closed, aals] = SourceReconMatlab(filePath);
-
+            
             % Rotate [trials x sources x time] to [sources x time x trials]
             fprintf('\n*** ROTATING DATA *** \n');
             subj_open = permute(source_ts_open, [2, 3, 1]);
@@ -57,29 +63,32 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
 
             % Calculate and store MVGC for each subject's data
             fprintf('\n*** CALCULATING MVGC %s - (%i/%i) *** \n', files(i).name(1:3), i, length(files));
-            [pwcgc_values_open, spwcgc_values_open, spwcgc_bands_values_open] = calculateMVGC(subj_open);
-            [pwcgc_values_closed, spwcgc_values_closed, spwcgc_bands_values_closed] = calculateMVGC(subj_closed);
+            [pwcgc_values_open, spwcgc_values_open, bands_values_open, info_open] = calculateMVGC(subj_open);
+            [pwcgc_values_closed, spwcgc_values_closed, bands_values_closed, info_closed] = calculateMVGC(subj_closed);
 
-            mvgc_open.(key) = pwcgc_values_open;
-            mvgc_closed.(key) = pwcgc_values_closed;
-
-            % pwcgc_open.(key) = pwcgc_values_open;
-            % pwcgc_closed.(key) = pwcgc_values_closed;
+            pwcgc_open.(key) = pwcgc_values_open;
+            pwcgc_closed.(key) = pwcgc_values_closed;
 
             spwcgc_open.(key) = spwcgc_values_open;
             spwcgc_closed.(key) = spwcgc_values_closed;
 
-            spwcgc_bands_open.(key) = spwcgc_bands_values_open;
-            spwcgc_bands_closed.(key) = spwcgc_bands_values_closed;
+            bands_open.(key) = bands_values_open;
+            bands_closed.(key) = bands_values_closed;
+
+            ss_info_open.(key) = info_open;
+            ss_info_closed.(key) = info_closed;
 
             fprintf('\n*** RESULTS SAVED: %s *** \n', files(i).name);
         end
     
     end
 
+    mvgc_open = pwcgc_open;  % Store pairwise conditional GC
+    mvgc_closed = pwcgc_closed;  % Store pairwise conditional GC
+
     %% Function to calculate MVGC for a given subject's data
 
-    function [pwcgc_values, spwcgc_values, bands_values] = calculateMVGC(subj_data)
+    function [pwcgc_values, spwcgc_values, bands_values, info] = calculateMVGC(subj_data)
 
         % Reconstruct 5 regions out of 60 sources
         frontal_data = subj_data(frontal, :, :);  % 20 srcs * 2000 samples * trials
@@ -103,24 +112,24 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
         X = regional_eeg;  % [regions x samples x trials]
 
         % VAR model order estimation
-        max_var_order = 20;  % reasonable maximum (has to be less than nobs)
-        fprintf('\nEstimating VAR model order (max order = %d)...\n', max_var_order);
-        % [varmoaic, varmobic, varmohqc, varmolrt] = tsdata_to_varmo(y, varmomax, 'LWR', [], false);
-        [varmo_aic, ~, ~, ~] = tsdata_to_varmo(X, max_var_order, 'LWR');
-        varmo = find(varmo_aic == min(varmo_aic), 1); % Select best AIC order
+        varmomax = 20;  % has to be less than nobs
+        varmosel = 'AIC';
+        fprintf('\nEstimating VAR model order (max order = %d)...\n', varmomax);
+        [varmoaic, varmobic, varmohqc, varmolrt] = tsdata_to_varmo(X, varmomax, 'LWR', [], []);
+        varmo = moselect(sprintf('VAR model order selection (max = %d)', varmomax), varmosel, 'AIC', varmoaic, 'BIC', varmobic, 'HQC', varmohqc, 'LRT', varmolrt);
         fprintf('Selected VAR model order (AIC): %d\n', varmo);
 
         % State-space model order estimation using SVC (faster)
         fprintf('Estimating state-space model order using SVC...\n');
-        [ssmo_svc, ~] = tsdata_to_sssvc(X, 2*varmo, [], []);
-        % [ssmo_svc, ssmo_max] = tsdata_to_ssmo(X, 2*varmo, 0);
+        [ssmo_svc, ssmo_max] = tsdata_to_sssvc(X, 2*varmo, [], []);
+        % [ssmo_svc, ssmo_max] = tsdata_to_ssmo(X, 2*varmo);  % Incredibly slow
         ssmo = ssmo_svc;
-        fprintf('Selected state-space model order (SVC): %d\n', ssmo);
+        fprintf('Selected state-space model order (SVC): %d (max = %d)\n', ssmo, ssmo_max);
 
         % Estimate SS model
         fprintf('Estimating state-space model parameters...\n');
         [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
-        info = ss_info(A, C, K, V, 0);
+        info = ss_info(A, C, K, V, 1);
         fprintf('\nState-space model information:\n');
         fprintf('  Observables: %d\n', info.observ);
         fprintf('  Model order: %d\n', info.morder);
@@ -132,9 +141,10 @@ function [mvgc_open, mvgc_closed, mvgc_open_avg, mvgc_closed_avg] = EEGtoMVGC()
         fprintf('  Multi-information (uniform): %.4f\n', info.mmii);
         if info.error
             fprintf('State-space model estimation encountered errors.\n');
-            return;
+            fprintf('Error code: %d\n', info.error);
+            % return;
         else
-            fprintf('State-space model estimation successful (with no errors).\n\n');
+            fprintf('State-space model estimation successful (no errors).\n\n');
         end
 
         % Compute time-domain pairwise conditional GC
