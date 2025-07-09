@@ -1,4 +1,4 @@
-function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
+function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptions()
 
     %% Load .mat and .m files
 
@@ -17,12 +17,6 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
 
     mvgc_open = struct();
     mvgc_closed = struct();
-
-    spwcgc_open = struct();
-    spwcgc_closed = struct();
-
-    bands_open = struct();
-    bands_closed = struct();
 
     ss_info_open = struct();
     ss_info_closed = struct();
@@ -62,17 +56,11 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
 
             % Calculate and store MVGC for each subject's data
             fprintf('\n*** CALCULATING MVGC %s - (%i/%i) *** \n', files(i).name(1:3), i, length(files));
-            [pwcgc_values_open, spwcgc_values_open, bands_values_open, info_open] = calculateMVGC(subj_open);
-            [pwcgc_values_closed, spwcgc_values_closed, bands_values_closed, info_closed] = calculateMVGC(subj_closed);
+            [pwcgc_values_open, info_open] = calculateMVGC(subj_open);
+            [pwcgc_values_closed, info_closed] = calculateMVGC(subj_closed);
 
-            pwcgc_open.(key) = pwcgc_values_open;
-            pwcgc_closed.(key) = pwcgc_values_closed;
-
-            spwcgc_open.(key) = spwcgc_values_open;
-            spwcgc_closed.(key) = spwcgc_values_closed;
-
-            bands_open.(key) = bands_values_open;
-            bands_closed.(key) = bands_values_closed;
+            mvgc_open.(key) = pwcgc_values_open;
+            mvgc_closed.(key) = pwcgc_values_closed;
 
             ss_info_open.(key) = info_open;
             ss_info_closed.(key) = info_closed;
@@ -82,194 +70,124 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
     
     end
 
-    mvgc_open = pwcgc_open;  % Store pairwise conditional GC
-    mvgc_closed = pwcgc_closed;  % Store pairwise conditional GC
-
     %% Function to calculate MVGC for a given subject's data
 
-    function [pwcgc_values, spwcgc_values, bands_values, info] = calculateMVGC(subj_data)
+    function [pwcgc_values, info] = calculateMVGC(subj_data)
 
         % Downsampling the data
         fprintf('\nDownsampling data to 250 Hz...\n');
-        disp(size(subj_data));  % [sources x samples x trials]
+        disp(size(subj_data));
         subj_data = subj_data(:, 1:2:end, :);  % Downsample to 250 Hz (from 500 Hz)
-        disp(size(subj_data));  % [sources x samples / 2 x trials]
+        disp(size(subj_data));
 
-        % Z-score each source across time for each trial
-        fprintf('\nZ-scoring each source across time for each trial...\n');
+        % Z-score each region across time for each trial
+        fprintf('\nZ-scoring data...\n');
         [n_sources, n_samples, n_trials] = size(subj_data);
         for trial = 1:n_trials
             for source = 1:n_sources
-                subj_data(source, :, trial) = zscore(subj_data(source, :, trial));
+                try
+                    subj_data(source, :, trial) = zscore(subj_data(source, :, trial));
+                catch
+                    fprintf('Error in z-scoring source %d, trial %d. Adding small noise.\n', source, trial);
+                    subj_data(source, :, trial) = zscore(subj_data(source, :, trial)) + randn(1, n_samples) * 0.001;  % Add small noise
+                end 
             end
         end
 
-        % % Concatenate trials along the third dimension
-        % fprintf('\nConcatenating trials...\n');
-        % [n_sources, n_samples, n_trials] = size(subj_data);
-        % subj_data = reshape(subj_data, n_sources, 1, n_trials * n_samples);
-        % disp(size(subj_data));  % [sources x 1 x trials * samples]
+        % disp(eig(cov(subj_data(:, :, 1)')));  % Display eigenvalues of covariance matrix for open condition
 
-        % % Z-score each source across concatenated trials
-        % fprintf('\nZ-scoring each source across concatenated trials...\n');
-        % for source = 1:n_sources
-        %     subj_data(source, 1, :) = zscore(subj_data(source, 1, :));
-        % end
+        %% Calculate MVGC between sources
 
-        % % Reshape back to [sources x samples x trials]
-        % fprintf('\nReshaping back to [sources x samples x trials]...\n');
-        % subj_data = reshape(subj_data, n_sources, n_samples, n_trials);
-        % disp(size(subj_data));  % [sources x samples x trials]
+        % Initialize MVGC matrix for region pairs
+        pwcgc_values = zeros(n_regions, n_regions);
 
-        % Reconstruct 5 regions out of 60 sources
-        frontal_data = subj_data(frontal, :, :);  % [20 srcs x samples x trials]
-        occipital_data = subj_data(occipital, :, :);  % [12 srcs x samples x trials]
-        parietal_data = subj_data(parietal, :, :);  % [12 srcs x samples x trials]
-        sensorimotor_data = subj_data(sensorimotor, :, :);  % [6 srcs x samples x trials]
-        temporal_data = subj_data(temporal, :, :);  % [10 srcs x samples x trials]
+        % Loop through all pairs of regions
+        for from_idx = 1:n_regions
+            for to_idx = 1:n_regions
 
-        n_regions = 5;
-        regional_eeg = zeros(n_regions, n_samples, n_trials);  % [regions x samples x trials]
+                if from_idx == to_idx
+                    continue; % Skip self-connections
+                end
 
-        regional_eeg(1, :, :) = squeeze(mean(frontal_data, 1));  % [samples x trials]
-        regional_eeg(2, :, :) = squeeze(mean(occipital_data, 1));
-        regional_eeg(3, :, :) = squeeze(mean(parietal_data, 1));
-        regional_eeg(4, :, :) = squeeze(mean(sensorimotor_data, 1));
-        regional_eeg(5, :, :) = squeeze(mean(temporal_data, 1));
+                fprintf('\n* MVGC (%d-%s -> %d-%s) *\n', ...
+                        from_idx, region_names{from_idx}, to_idx, region_names{to_idx});
 
-        %% Calculate MVGC between regions
+                from_set = region_indices{from_idx};
+                to_set = region_indices{to_idx};
+                combined_set = [from_set, to_set];
+                X = subj_data(combined_set, :, :);
 
-        % Z-score each region across time for each trial
-        fprintf('\nZ-scoring each region across time for each trial...\n');
-        for trial = 1:size(regional_eeg, 3)
-            for region = 1:size(regional_eeg, 1)
-                regional_eeg(region, :, trial) = zscore(regional_eeg(region, :, trial));
+                % VAR model order estimation
+                varmomax = 5;
+                varmosel = 'AIC';
+                fprintf('\nEstimating VAR model order (max order = %d)...\n', varmomax);
+                [varmoaic, varmobic, varmohqc, varmolrt] = tsdata_to_varmo(X, varmomax, 'LWR', [], []);
+                varmo = moselect(sprintf('VAR model order selection (max = %d)', varmomax), ... 
+                        varmosel, 'AIC', varmoaic, 'BIC', varmobic, 'HQC', varmohqc, 'LRT', varmolrt);
+                fprintf('Selected VAR model order (%s): %d\n', varmosel, varmo);
+
+                % State-space model order estimation using SVC (faster)
+                fprintf('\nEstimating state-space model order using SVC...\n');
+                [ssmo_svc, ssmo_max] = tsdata_to_sssvc(X, 2*varmo, [], []);
+                % [ssmo_svc, ssmo_max] = tsdata_to_ssmo(X, 2*varmo);  % Incredibly slow
+                ssmo = ssmo_svc;
+                fprintf('Selected state-space model order (SVC): %d (max = %d)\n', ssmo, ssmo_max);
+                
+                % Estimate SS model
+                fprintf('Estimating state-space model parameters...\n');
+                [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
+                info = ss_info(A, C, K, V, 1);
+                % fprintf('\nState-space model information:\n');
+                % fprintf('  Observables: %d\n', info.observ);
+                % fprintf('  Model order: %d\n', info.morder);
+                % fprintf('  Rho A: %.4f\n', info.rhoA);
+                % fprintf('  Rho B: %.4f\n', info.rhoB);
+                % fprintf('  Autocovariance decay: %d\n', info.acdec);
+                fprintf('  Sigma SPD: %d\n', info.sigspd);
+                % fprintf('  Multi-information: %.4f\n', info.mii);
+                % fprintf('  Multi-information (uniform): %.4f\n', info.mmii);
+                if info.error
+                    fprintf('State-space model estimation encountered errors.\n');
+                    % fprintf('Error code: %d\n', info.error);
+                    % return;
+                else
+                    fprintf('State-space model estimation successful (no errors).\n\n');
+                end
+
+                % Find the indices of from_set and to_set within combined_set
+                % combined_set = sort(combined_set);
+                [~, from_indices_sub] = ismember(from_set, combined_set);
+                [~, to_indices_sub] = ismember(to_set, combined_set);
+
+                disp('From indices:');
+                disp(from_set);
+                disp('To indices:');
+                disp(to_set);
+
+                disp('From indices (sub):');
+                disp(from_indices_sub);
+                disp('To indices  (sub):');
+                disp(to_indices_sub);
+                
+                % Compute MVGC from from_set to to_set
+                try
+                    mvgc_val = ss_to_mvgc(A, C, K, V, to_indices_sub, from_indices_sub);
+                    disp('MVGC values:');
+                    fprintf('\nMVGC value (%d-%s -> %d-%s):\n', ...
+                        from_idx, region_names{from_idx}, to_idx, region_names{to_idx});
+                    disp(mvgc_val);
+                    % Average MVGC value from all from->to connections
+                    pwcgc_values(from_idx, to_idx) = mean(mvgc_val(:));
+                catch
+                    pwcgc_values(from_idx, to_idx) = NaN;
+                    fprintf('\nMVGC (%d-%s -> %d-%s) computation failed\n', ...
+                        from_idx, region_names{from_idx}, to_idx, region_names{to_idx});
+                end
             end
         end
 
-        % % Concatenate trials along the third dimension
-        % fprintf('\nConcatenating trials...\n');
-        % [n_regions, n_samples, n_trials] = size(regional_eeg);
-        % regional_eeg = reshape(regional_eeg, n_regions, 1, n_trials * n_samples);
-        % disp(size(regional_eeg));  % [regions x 1 x trials * samples]
-
-        % % Z-score each source across concatenated trials
-        % fprintf('\nZ-scoring each source across concatenated trials...\n');
-        % for source = 1:n_regions
-        %     regional_eeg(source, 1, :) = zscore(regional_eeg(source, 1, :));
-        % end
-
-        % % Reshape back to [regional_eeg x samples x trials]
-        % fprintf('\nReshaping back to [regional_eeg x samples x trials]...\n');
-        % regional_eeg = reshape(regional_eeg, n_regions, n_samples, n_trials);
-        % disp(size(regional_eeg));  % [regional_eeg x samples x trials]
-
-        X = regional_eeg;  % [regions x samples x trials]
-
-        % VAR model order estimation
-        varmomax = 5;
-        varmosel = 'AIC';
-        fprintf('\nEstimating VAR model order (max order = %d)...\n', varmomax);
-        [varmoaic, varmobic, varmohqc, varmolrt] = tsdata_to_varmo(X, varmomax, 'LWR', [], []);
-        varmo = moselect(sprintf('VAR model order selection (max = %d)', varmomax), varmosel, 'AIC', varmoaic, 'BIC', varmobic, 'HQC', varmohqc, 'LRT', varmolrt);
-        fprintf('Selected VAR model order (AIC): %d\n', varmo);
-
-        % State-space model order estimation using SVC (faster)
-        fprintf('Estimating state-space model order using SVC...\n');
-        [ssmo_svc, ssmo_max] = tsdata_to_sssvc(X, 2*varmo, [], []);
-        % [ssmo_svc, ssmo_max] = tsdata_to_ssmo(X, 2*varmo);  % Incredibly slow
-        ssmo = ssmo_svc;
-        fprintf('Selected state-space model order (SVC): %d (max = %d)\n', ssmo, ssmo_max);
-
-        % Estimate SS model
-        fprintf('Estimating state-space model parameters...\n');
-        [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
-        info = ss_info(A, C, K, V, 1);
-        % fprintf('\nState-space model information:\n');
-        % fprintf('  Observables: %d\n', info.observ);
-        % fprintf('  Model order: %d\n', info.morder);
-        % fprintf('  Rho A: %.4f\n', info.rhoA);
-        % fprintf('  Rho B: %.4f\n', info.rhoB);
-        % fprintf('  Autocovariance decay: %d\n', info.acdec);
-        fprintf('  Sigma SPD: %d\n', info.sigspd);
-        % fprintf('  Multi-information: %.4f\n', info.mii);
-        % fprintf('  Multi-information (uniform): %.4f\n', info.mmii);
-        if info.error
-            fprintf('State-space model estimation encountered errors.\n');
-            % fprintf('Error code: %d\n', info.error);
-            % return;
-        else
-            fprintf('State-space model estimation successful (no errors).\n\n');
-        end
-
-        % Compute time-domain pairwise conditional GC
-        fprintf('Computing time-domain pairwise conditional MVGC... (1/2)\n');
-        pwcgc_values = ss_to_pwcgc(A, C, K, V);
-
-        % Compute spectral pairwise conditional GC
-        % fprintf('Computing spectral pairwise conditional GC... (2/2)\n');
-        % fres = 200;  % frequency resolution
-        % spwcgc_values = ss_to_spwcgc(A, C, K, V, fres);  % [nvars x nvars x fres]
-        % bands_values = compute_band_gc(spwcgc_values, 200, fres);
-        spwcgc_values = struct();
-        bands_values = struct();
-        
         fprintf('\nMVGC computation complete.\n');
 
-        % Validate result
-        if isbad(pwcgc_values, false)
-            error('pwcgc_values estimation failed');
-        end
-
-        % if isbad(spwcgc_values, false)
-        %     error('spwcgc_values estimation failed');
-        % end
-
-        % Print mvgc contents
-        fprintf('\npwcgc_values contents:\n\n');
-        disp(pwcgc_values);
-
-        % fprintf('\nbands_values.delta contents:\n\n');
-        % disp(bands_values.delta);
-
-        % fprintf('\nbands_values.theta contents:\n\n');
-        % disp(bands_values.theta);
-
-        % fprintf('\nbands_values.alpha contents:\n\n');
-        % disp(bands_values.alpha);
-
-        % fprintf('\nbands_values.beta contents:\n\n');
-        % disp(bands_values.beta);
-
-        % fprintf('\nbands_values.gamma contents:\n\n');
-        % disp(bands_values.gamma);
-
-    end
-
-    function band_gc = compute_band_gc(gc_spectral, fs, fres)
-
-        % Frequency vector (0 to Nyquist)
-        nyq = fs / 2;
-        freqs = linspace(0, nyq, fres + 1);
-
-        % Define frequency bands (in Hz)
-        bands = struct( ...
-            'delta', [0.5 4], ...
-            'theta', [4 8], ...
-            'alpha', [8 13], ...
-            'beta',  [13 30], ...
-            'gamma', [30 80] ...
-        );
-
-        band_names = fieldnames(bands);
-
-        % Loop through each band and average across frequency indices
-        for b = 1:numel(band_names)
-            band = band_names{b};
-            range = bands.(band);
-            idx = freqs >= range(1) & freqs <= range(2);
-            band_gc.(band) = mean(gc_spectral(:, :, idx), 3);
-        end
     end
 
     %% Load MVGC results from mvgc_values.mat
