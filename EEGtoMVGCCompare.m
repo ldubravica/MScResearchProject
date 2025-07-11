@@ -1,4 +1,11 @@
-function [] = EEGtoMVGCCompare()
+function [] = EEGtoMVGCCompare(output_csv, output_figures)
+
+    if nargin < 1 || isempty(output_csv)
+        output_csv = false;
+    end
+    if nargin < 2 || isempty(output_figures)
+        output_figures = false;
+    end
 
     method_names = {'brain_source', 'source', 'pca', 'region'};
 
@@ -29,11 +36,11 @@ function [] = EEGtoMVGCCompare()
     %     'mvgc_open_depressed', 'mvgc_closed_depressed', ...
     %     'mvgc_open', 'mvgc_closed'];
 
-    compare_mvgc_methods(method_names, fields_to_compare, false);
+    compare_mvgc_methods(method_names, fields_to_compare, output_csv, output_figures);
 
 end
 
-function compare_mvgc_methods(method_names, fields_to_compare, output_csv)
+function compare_mvgc_methods(method_names, fields_to_compare, output_csv, output_figures)
 
     n_methods = length(method_names);
     similarity_results = struct();
@@ -102,6 +109,7 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv)
         % --- Visualization ---
 
         figure('Name', field, 'NumberTitle', 'off');
+        sgtitle(sprintf('MVGC Similarity - %s', strrep(field, '_', ' ')), 'FontSize', 16);
 
         % Define colors
         n = 128;
@@ -109,9 +117,18 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv)
         pos_colors = [ones(n,1), linspace(1,0,n)', linspace(1,0,n)']; % white to red
         diverging_cmap = [neg_colors; pos_colors];
 
-        subplot_similarity_matrix(1, corr_mat, 'Correlation Matrix', [-1 1], diverging_cmap);
-        subplot_similarity_matrix(2, cosine_mat, 'Cosine Similarity Matrix', [0 1], pos_colors);
-        subplot_similarity_matrix(3, mse_mat, 'MSE Matrix', [], neg_colors);
+        subplot_similarity_matrix(1, corr_mat, field, 'Correlation Matrix', [-1 1], diverging_cmap);
+        subplot_similarity_matrix(2, cosine_mat, field, 'Cosine Similarity Matrix', [0 1], pos_colors);
+        subplot_similarity_matrix(3, mse_mat, field, 'MSE Matrix', [], neg_colors);
+
+        if (output_figures)
+            if ~exist(fullfile('output', 'images'), 'dir')
+                mkdir(fullfile('output', 'images'));
+            end
+            filename = sprintf('mvgc_similarity - %s - %s.png', field, datetime('now', 'Format', 'yyyy_MM_dd'));
+            saveas(gcf, fullfile('output', 'images', filename));
+            % close(gcf);  % Close the figure after saving
+        end
 
         % --- Store results ---
 
@@ -135,7 +152,7 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv)
         writetable(all_results, 'mvgc_similarity.csv');
     end
 
-    function [] = subplot_similarity_matrix(idx, similarity_mat, title_str, range, colormap_name)
+    function [] = subplot_similarity_matrix(idx, similarity_mat, field, title_str, range, colormap_name)
         subplot(1,3,idx);
         if range % Check if range is provided
             imagesc(similarity_mat, range);
@@ -160,6 +177,17 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv)
                         'Color', 'k', 'FontSize', 11, 'HorizontalAlignment', 'center');
             end
         end
+
+        % Save the figure
+        % if (idx == 3)
+        %     if ~exist(fullfile('output', 'images'), 'dir')
+        %         mkdir(fullfile('output', 'images'));
+        %     end
+        %     filename = sprintf('mvgc_similarity - %s_%s - %s.png', field, strrep(title_str, ' ', '_'), datetime('now', 'Format', 'yyyy_mm_dd'));
+        %     saveas(gcf, fullfile('output', 'images', filename));
+        %     % close(gcf);  % Close the figure after saving
+        % end
+        
     end
 
 end
