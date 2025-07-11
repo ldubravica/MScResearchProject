@@ -12,8 +12,8 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         mvgc_format = 'source';  % Options: 'source', 'region', 'pca', 'brain_source'
     end
 
-    filename = 'mvgc_values.mat';
-    % filename = sprintf('mvgc_results_%s.mat', mvgc_format);
+    % filename = 'mvgc_values.mat';
+    filename = sprintf('mvgc_results_%s.mat', mvgc_format);
 
     %% Load .mat and .m files
 
@@ -52,8 +52,8 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     if ~load_mvgc_file
 
         % Loop through each file
-        % for i = 1:length(files)
-        for file_idx = 1:1
+        for file_idx = 1:length(files)
+        % for file_idx = 1:1
             % Load the .mat file
             fprintf('\n*** PROCESSING FILE: %s *** \n', files(file_idx).name);
             filePath = fullfile(dataDir, files(file_idx).name);
@@ -92,7 +92,14 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
                 error('Invalid mvgc_format specified. Choose from: source, region, pca, brain_source');
             end
 
-            fprintf('\nMVGC computation complete.\n');
+            % Display results
+            fprintf('\nMVGC computation for %s completed.\n', files(file_idx).name);
+            fprintf('\nOpen condition MVGC values:\n');
+            disp(pwcgc_values_open);
+            fprintf('\nClosed condition MVGC values:\n');
+            disp(pwcgc_values_closed);
+
+            % fprintf('\nMVGC computation complete.\n');
 
             mvgc_open.(key) = pwcgc_values_open;
             mvgc_closed.(key) = pwcgc_values_closed;
@@ -108,9 +115,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     function [subj_data] = downsampleAndStandardize(subj_data)
 
         % Downsampling the data
-        disp(size(subj_data));
         subj_data = subj_data(:, 1:2:end, :);  % Downsample to 250 Hz (from 500 Hz)
-        disp(size(subj_data));
 
         % Z-score each region across time for each trial
         [n_sources, n_samples, n_trials] = size(subj_data);
@@ -138,12 +143,10 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         fprintf('\nEstimating VAR order (max=%d)...\n', varmomax);
         [aic, bic, hqc, lrt] = tsdata_to_varmo(X, varmomax, 'LWR', [], []);
         varmo = moselect('VAR Order Selection', varmosel, 'AIC', aic, 'BIC', bic, 'HQC', hqc, 'LRT', lrt);
-        fprintf('Selected VAR order: %d (%s)\n', varmo, varmosel);
+        % fprintf('Selected VAR order: %d (%s)\n', varmo, varmosel);
 
-        fprintf('Estimating SS model order (SVC)...\n');
+        fprintf('Estimating SS model order (SVC) and parameters...\n');
         [ssmo, ~] = tsdata_to_sssvc(X, 2*varmo, [], []);
-
-        fprintf('Estimating SS model parameters...\n');
         [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
         info = ss_info(A, C, K, V, 1);
         fprintf('  Sigma SPD: %d\n', info.sigspd);
@@ -151,7 +154,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         if info.error
             fprintf('⚠️ SS model estimation encountered errors.\n');
         else
-            fprintf('✅ SS model estimation successful.\n');
+            fprintf('SS model estimation successful.\n');
         end
     end
 
@@ -169,7 +172,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
                     continue; % Skip self-connections
                 end
 
-                fprintf('\n* MVGC (%d-%s -> %d-%s) *\n', ...
+                fprintf('\n** MVGC (%d-%s -> %d-%s) **\n', ...
                         from_idx, region_names{from_idx}, to_idx, region_names{to_idx});
 
                 from_set = region_indices{from_idx};
@@ -180,24 +183,13 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
                 % Model order estimation
                 [A, C, K, V, info] = estimateVARSS(X);
 
-                % Find the indices of from_set and to_set within combined_set
-                % combined_set = sort(combined_set);
-                [~, from_indices_sub] = ismember(from_set, combined_set);
-                [~, to_indices_sub] = ismember(to_set, combined_set);
-
-                disp('From indices:');
-                disp(from_set);
-                disp('To indices:');
-                disp(to_set);
-
-                disp('From indices (sub):');
-                disp(from_indices_sub);
-                disp('To indices  (sub):');
-                disp(to_indices_sub);
+                % Calculate from_indices and to_indices
+                from_set_X = 1:length(from_set);
+                to_set_X = (length(from_set) + 1):(length(from_set) + length(to_set));
                 
                 % Compute MVGC from from_set to to_set
                 try
-                    mvgc_val = ss_to_mvgc(A, C, K, V, to_indices_sub, from_indices_sub);
+                    mvgc_val = ss_to_mvgc(A, C, K, V, to_set_X, from_set_X);
                     fprintf('\nMVGC value (%d-%s -> %d-%s):\n', ...
                         from_idx, region_names{from_idx}, to_idx, region_names{to_idx});
                     disp(mvgc_val);
@@ -241,16 +233,6 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
                 % combined_set = sort(combined_set);
                 [~, from_indices_sub] = ismember(from_set, combined_set);
                 [~, to_indices_sub] = ismember(to_set, combined_set);
-
-                disp('From indices:');
-                disp(from_set);
-                disp('To indices:');
-                disp(to_set);
-
-                disp('From indices (sub):');
-                disp(from_indices_sub);
-                disp('To indices  (sub):');
-                disp(to_indices_sub);
                 
                 % Compute MVGC from from_set to to_set
                 try
@@ -408,7 +390,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     end
 
     % Create a binary list of whether each subject is healthy or depressed
-    disp(depressed_sample)
+    % disp(depressed_sample)
     depressed_binary_labels = zeros(1, length(files));
     for file_idx = 1:length(files)
         key = sprintf('x%s', files(file_idx).name(1:3));
@@ -470,7 +452,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
 
     %% Acquire corrected p-values and t-values for each MVGC matrix
 
-    fprintf('\n*** ACQUIRING CORRECTED P-VALUES AND T-VALUES *** \n');
+    fprintf('\n*** ACQUIRING CORRECTED P-VALUES AND T-VALUES *** \n\n');
 
     n_subjects = length(files);
 
@@ -487,8 +469,10 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     end
 
     % Initialize results
-    mvgc_open_tvals   = zeros(n_regions);
-    mvgc_closed_tvals = zeros(n_regions);
+    mvgc_open_pvals   = zeros(n_regions, n_regions);
+    mvgc_open_tvals   = zeros(n_regions, n_regions);
+    mvgc_closed_pvals = zeros(n_regions, n_regions);
+    mvgc_closed_tvals = zeros(n_regions, n_regions);
 
     n_tests = n_regions^2 - n_regions;
     open_p_list   = zeros(n_tests, 1);
@@ -505,15 +489,23 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
 
             index_map(map_idx, :) = [r1, r2];
 
-            [p_open, t_open] = get_p_t_value(squeeze(mvgc_open_3d(r1, r2, :))');
+            mvgc_r1_r2_open = squeeze(mvgc_open_3d(r1, r2, :))';
+            [p_open, t_open] = get_p_t_value(mvgc_r1_r2_open);
             open_p_list(map_idx) = p_open;
+            mvgc_open_pvals(r1, r2) = p_open;
             mvgc_open_tvals(r1, r2) = t_open;
 
-            [p_closed, t_closed] = get_p_t_value(squeeze(mvgc_closed_3d(r1, r2, :))');
+            mvgc_r1_r2_closed = squeeze(mvgc_closed_3d(r1, r2, :))';
+            [p_closed, t_closed] = get_p_t_value(mvgc_r1_r2_closed);
             closed_p_list(map_idx) = p_closed;
+            mvgc_closed_pvals(r1, r2) = p_closed;
             mvgc_closed_tvals(r1, r2) = t_closed;
 
             map_idx = map_idx + 1;
+
+            disp('Region pair squeezes:')
+            disp(mvgc_r1_r2_open);
+            disp(mvgc_r1_r2_closed);
 
             fprintf('Region %d-%s to %d-%s: p_open = %.3f, t_open = %.3f, p_closed = %.3f, t_closed = %.3f\n', ...
                     r1, region_names{r1}, r2, region_names{r2}, p_open, t_open, p_closed, t_closed);
@@ -527,39 +519,73 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         t = stats.tstat;
     end
 
-    % === Apply FDR correction ===
-    [~, ~, ~, open_fdr_pvals] = fdr_bh(open_p_list, 0.05, 'pdep', 'yes');
-    [~, ~, ~, closed_fdr_pvals] = fdr_bh(closed_p_list, 0.05, 'pdep', 'yes');
+    % --- BASELINE ---
+
+    % % === Apply FDR correction ===
+    % [~, ~, ~, open_fdr_pvals] = fdr_bh(open_p_list, 0.05, 'pdep', 'yes');
+    % [~, ~, ~, closed_fdr_pvals] = fdr_bh(closed_p_list, 0.05, 'pdep', 'yes');
+
+    % % === Reassign corrected p-values back to matrices ===
+    % mvgc_open_pvals_corrected = NaN(n_regions, n_regions);
+    % mvgc_closed_pvals_corrected = NaN(n_regions, n_regions);
+
+    % disp(open_p_list);
+    % disp(closed_p_list);
+    % disp(open_fdr_pvals);
+    % disp(closed_fdr_pvals);
+    % % disp(index_map);
+
+    % for i = 1:(n_regions * (n_regions - 1))
+    %     r1 = index_map(i,1);
+    %     r2 = index_map(i,2);
+    %     mvgc_open_pvals_corrected(r1, r2) = open_fdr_pvals(i);
+    %     mvgc_closed_pvals_corrected(r1, r2) = closed_fdr_pvals(i);
+    %     % disp('mvgc_open_pvals_corrected:');
+    %     % disp(mvgc_open_pvals_corrected);
+    %     % disp(mvgc_closed_pvals_corrected);
+    %     % disp(r1);
+    %     % disp(r2)
+    % end
+
+    % % Optional: Mask t-values based on corrected significance (e.g., α = 0.05)
+    % alpha = 0.05;
+    % mvgc_open_tvals_masked = mvgc_open_tvals;
+    % mvgc_open_tvals_masked(mvgc_open_pvals_corrected > alpha) = 0;
+
+    % mvgc_closed_tvals_masked = mvgc_closed_tvals;
+    % mvgc_closed_tvals_masked(mvgc_closed_pvals_corrected > alpha) = 0;
+
+    % --- ALTERNATIVE ---
+
+    % === Apply FDR correction using mafdr ===
+    open_fdr_pvals = mafdr(open_p_list, 'BHFDR', true);
+    closed_fdr_pvals = mafdr(closed_p_list, 'BHFDR', true);
 
     % === Reassign corrected p-values back to matrices ===
     mvgc_open_pvals_corrected = NaN(n_regions, n_regions);
     mvgc_closed_pvals_corrected = NaN(n_regions, n_regions);
-
-    disp(open_p_list);
-    disp(closed_p_list);
-    disp(open_fdr_pvals);
-    disp(closed_fdr_pvals);
-    % disp(index_map);
 
     for i = 1:(n_regions * (n_regions - 1))
         r1 = index_map(i,1);
         r2 = index_map(i,2);
         mvgc_open_pvals_corrected(r1, r2) = open_fdr_pvals(i);
         mvgc_closed_pvals_corrected(r1, r2) = closed_fdr_pvals(i);
-        % disp('mvgc_open_pvals_corrected:');
-        % disp(mvgc_open_pvals_corrected);
-        % disp(mvgc_closed_pvals_corrected);
-        % disp(r1);
-        % disp(r2)
     end
 
-    % Optional: Mask t-values based on corrected significance (e.g., α = 0.05)
+    % === Mask t-values based on corrected significance (e.g., α = 0.05) ===
     alpha = 0.05;
     mvgc_open_tvals_masked = mvgc_open_tvals;
     mvgc_open_tvals_masked(mvgc_open_pvals_corrected > alpha) = 0;
 
     mvgc_closed_tvals_masked = mvgc_closed_tvals;
     mvgc_closed_tvals_masked(mvgc_closed_pvals_corrected > alpha) = 0;
+
+    % --- Display results ---
+
+    disp('mvgc_open_pvals:');
+    disp(mvgc_open_pvals);
+    disp('mvgc_closed_pvals:');
+    disp(mvgc_closed_pvals);
 
     disp('mvgc_open_pvals_corrected:');
     disp(mvgc_open_pvals_corrected);
@@ -583,7 +609,8 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     
     mvgc_p_t = {mvgc_open_pvals_corrected, mvgc_closed_pvals_corrected, mvgc_open_tvals_masked, mvgc_closed_tvals_masked};
 
-    plot_mvgc(mvgc_p_t, region_names, plot_titles, 'MVGC P-Values and T-Values', [0.05, 0.05, 1.7, 1.7]);
+    mvgc_p_t_title = sprintf('MVGC P-Values and T-Values (%s)', mvgc_format);
+    plot_mvgc(mvgc_p_t, region_names, plot_titles, mvgc_p_t_title, [0.05, 0.05, 1.7, 1.7]);
 
     %% Plot differences between MVGC matrices
 
@@ -595,7 +622,8 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     mvgc_diff = {mvgc_open_avg_diff, mvgc_closed_avg_diff, mvgc_eyes_diff, mvgc_health_diff};
     diff_titles = {'Open Healthy vs Open Depressed', 'Closed Healthy vs Closed Depressed', 'Open vs Closed', 'Healthy vs Depressed'};
 
-    plot_mvgc(mvgc_diff, region_names, diff_titles, 'MVGC Differences', []);
+    mvgc_diff_title = sprintf('MVGC Differences (%s)', mvgc_format);
+    plot_mvgc(mvgc_diff, region_names, diff_titles, mvgc_diff_title, []);
 
     function plot_mvgc(mvgc_matrices, region_names, titles, super_title, signif_threshs)
         % Find global color limits
@@ -626,7 +654,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
             ylabel('From Region');
             axis square;
 
-            % Write the difference values in the center of each cell
+            % Write the values in the center of each cell
             for r = 1:length(region_names)
                 for c = 1:length(region_names)
                     text(c, r, sprintf('%.3f', mvgc_matrices{i}(r, c)), ...
@@ -668,10 +696,17 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
 
     save(fullfile(filename), ...
          'mvgc_open', 'mvgc_closed', ...
-         'mvgc_open_healthy', 'mvgc_open_depressed', ...
-         'mvgc_closed_healthy', 'mvgc_closed_depressed', ...
-         'mvgc_open_healthy_avg', 'mvgc_open_depressed_avg', ...
-         'mvgc_closed_healthy_avg', 'mvgc_closed_depressed_avg');
+         'mvgc_open_healthy', 'mvgc_closed_healthy', ...
+         'mvgc_open_depressed', 'mvgc_closed_depressed', ...
+         'mvgc_open_healthy_avg', 'mvgc_closed_healthy_avg', ...
+         'mvgc_open_depressed_avg', 'mvgc_closed_depressed_avg', ...
+         'mvgc_open_avg', 'mvgc_closed_avg', ...
+         'mvgc_healthy_avg', 'mvgc_depressed_avg', ...
+         'mvgc_open_pvals', 'mvgc_closed_pvals', ...
+         'mvgc_open_pvals_corrected', 'mvgc_closed_pvals_corrected', ...
+         'mvgc_open_tvals', 'mvgc_closed_tvals', ...
+         'mvgc_open_tvals_masked', 'mvgc_closed_tvals_masked', ...
+         'ss_info_open', 'ss_info_closed');
 
     fprintf('\n*** FILES SAVED *** \n');
 
