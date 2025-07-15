@@ -9,7 +9,7 @@ function [] = EEGtoMVGCCompare(output_csv, output_figures)
 
     method_names = {'brain_source', 'source', 'pca', 'region'};
 
-    fields_to_compare = { ...
+    values_to_compare = { ...
         'mvgc_open_healthy_avg', 'mvgc_closed_healthy_avg', ...
         'mvgc_open_depressed_avg', 'mvgc_closed_depressed_avg', ...
         'mvgc_open_avg', 'mvgc_closed_avg', ...
@@ -20,23 +20,23 @@ function [] = EEGtoMVGCCompare(output_csv, output_figures)
         'mvgc_open_tvals_masked', 'mvgc_closed_tvals_masked' ...
     };
 
-    % fields_to_compare = { ...
-    %     'mvgc_open_healthy_avg', 'mvgc_closed_healthy_avg', ...
-    %     'mvgc_open_depressed_avg', ...
-    %     'mvgc_open_avg', 'mvgc_closed_avg', ...
-    %     'mvgc_open_pvals', 'mvgc_closed_pvals', ...
-    %     'mvgc_open_tvals_masked' ...
-    % };
+    % values_to_compare = {'mvgc_open_healthy_avg'};
 
-    % fields_to_compare = {'mvgc_open_healthy_avg'};
-
-    % add struct fields to fields_to_compare - TODO
-    % fields_to_compare = [fields_to_compare, ...
+    % add struct fields to values_to_compare - TODO
+    % values_to_compare = [values_to_compare, ...
     %     'mvgc_open_healthy', 'mvgc_closed_healthy', ...
     %     'mvgc_open_depressed', 'mvgc_closed_depressed', ...
     %     'mvgc_open', 'mvgc_closed'];
 
-    compare_mvgc_methods(method_names, fields_to_compare, output_csv, output_figures);
+    % Compare MVGC matrices and derived metrics
+    compare_mvgc_methods(method_names, values_to_compare, output_csv, output_figures);
+
+    % Compare ss_info parameters across methods
+    info_to_compare = {'morder', 'rhoA', 'rhoB', 'acdec', 'sigspd', 'mii', 'mmii'};
+    info_descriptions = {'Model Order', 'Rho A', 'Rho B', 'Autocorrelation Decay', ...
+                         'Sigma SPD (the covariance matrix is symmetric positive definite)', ...
+                         'Mutual Information Index', 'Multivariate Mutual Information Index'};
+    compare_ss_info(method_names, info_to_compare, info_descriptions, output_csv);
 
 end
 
@@ -44,9 +44,6 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv, outpu
 
     n_methods = length(method_names);
     similarity_results = struct();
-    all_results = table(length(fields_to_compare));
-
-    % Define table() of size fields_to_compare x (6) to store results
     all_results = table('Size', [length(fields_to_compare), 6], ...
         'VariableTypes', {'string', 'string', 'string', 'double', 'double', 'double'}, ...
         'VariableNames', {'Field', 'Method1', 'Method2', 'Correlation', 'Cosine', 'MSE'});
@@ -117,9 +114,9 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv, outpu
         pos_colors = [ones(n,1), linspace(1,0,n)', linspace(1,0,n)']; % white to red
         diverging_cmap = [neg_colors; pos_colors];
 
-        subplot_similarity_matrix(1, corr_mat, field, 'Correlation Matrix', [-1 1], diverging_cmap);
-        subplot_similarity_matrix(2, cosine_mat, field, 'Cosine Similarity Matrix', [0 1], pos_colors);
-        subplot_similarity_matrix(3, mse_mat, field, 'MSE Matrix', [], neg_colors);
+        subplot_similarity_matrix(1, corr_mat, 'Correlation Matrix', [-1 1], diverging_cmap);
+        subplot_similarity_matrix(2, cosine_mat, 'Cosine Similarity Matrix', [0 1], pos_colors);
+        subplot_similarity_matrix(3, mse_mat, 'MSE Matrix', [], neg_colors);
 
         if (output_figures)
             if ~exist(fullfile('output', 'images'), 'dir')
@@ -152,7 +149,7 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv, outpu
         writetable(all_results, 'mvgc_similarity.csv');
     end
 
-    function [] = subplot_similarity_matrix(idx, similarity_mat, field, title_str, range, colormap_name)
+    function [] = subplot_similarity_matrix(idx, similarity_mat, title_str, range, colormap_name)
         subplot(1,3,idx);
         if range % Check if range is provided
             imagesc(similarity_mat, range);
@@ -177,17 +174,112 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv, outpu
                         'Color', 'k', 'FontSize', 11, 'HorizontalAlignment', 'center');
             end
         end
+    end
 
-        % Save the figure
-        % if (idx == 3)
-        %     if ~exist(fullfile('output', 'images'), 'dir')
-        %         mkdir(fullfile('output', 'images'));
-        %     end
-        %     filename = sprintf('mvgc_similarity - %s_%s - %s.png', field, strrep(title_str, ' ', '_'), datetime('now', 'Format', 'yyyy_mm_dd'));
-        %     saveas(gcf, fullfile('output', 'images', filename));
-        %     % close(gcf);  % Close the figure after saving
-        % end
-        
+end
+
+function compare_ss_info(method_names, ss_fields, ss_descriptions, output_csv)
+    n_methods = length(method_names);
+    ss_data_open = struct();
+    ss_data_closed = struct();
+
+    fprintf('\n');
+
+    % Load all data for open/closed
+    for i = 1:n_methods
+        filename = ['mvgc_results_' method_names{i} '.mat'];
+        data = load(filename, 'ss_info_open', 'ss_info_closed');
+        ss_data_open.(method_names{i}) = data.ss_info_open;
+        ss_data_closed.(method_names{i}) = data.ss_info_closed;
+    end
+
+    values_open = struct();
+    values_closed = struct();
+
+    calcs_open = struct();
+    calcs_closed = struct();
+
+    for method_idx = 1:n_methods
+        method = method_names{method_idx};
+        calcs_open.(method) = struct();
+        calcs_closed.(method) = struct();
+
+        for field_idx = 1:length(ss_fields)
+            field = ss_fields{field_idx};
+
+            subj_names = fieldnames(ss_data_open.(method));
+            n_subj = numel(subj_names);
+
+            vals_open = zeros(1, n_subj);
+            vals_closed = zeros(1, n_subj);
+
+            for s = 1:n_subj
+                subj = subj_names{s};
+                vals_open(s) = ss_data_open.(method).(subj).(field);
+                vals_closed(s) = ss_data_closed.(method).(subj).(field);
+            end
+
+            values_open.(method).(field) = vals_open;
+            values_closed.(method).(field) = vals_closed;
+
+            if ~isempty(vals_open)
+                calcs_open.(method).(field) = mean(vals_open);
+                calcs_open.(method).([field '_std']) = std(vals_open);
+            else
+                calcs_open.(method).(field) = NaN;
+                calcs_open.(method).([field '_std']) = NaN;
+            end
+
+            if ~isempty(vals_closed)
+                calcs_closed.(method).(field) = mean(vals_closed);
+                calcs_closed.(method).([field '_std']) = std(vals_closed);
+            else
+                calcs_closed.(method).(field) = NaN;
+                calcs_closed.(method).([field '_std']) = NaN;
+            end
+        end
+    end
+
+    % Display results
+    for field_idx = 1:length(ss_fields)
+        field = ss_fields{field_idx};
+        % description = ss_descriptions{field_idx};
+
+        fprintf('\n\033[1mSS Info Field: %s\033[0m\n\n', field); % Bold in most terminals
+        fprintf('%-12s | %-30s | %-30s\n', 'Method', 'Open (mean ± std)', 'Closed (mean ± std)');
+        fprintf('%s\n', repmat('-', 1, 80));
+        for method_idx = 1:n_methods
+            method = method_names{method_idx};
+            fprintf('%-12s | %-30s | %-30s\n', method, ...
+                sprintf('%.4f ± %.4f', calcs_open.(method).(field), calcs_open.(method).([field '_std'])), ...
+                sprintf('%.4f ± %.4f', calcs_closed.(method).(field), calcs_closed.(method).([field '_std'])));
+        end
+        fprintf('\n');
+    end
+
+    % Export CSV
+    if output_csv
+        all_results = table('Size', [length(ss_fields), 6], ...
+            'VariableTypes', {'string', 'string', 'string', 'double', 'double', 'double'}, ...
+            'VariableNames', {'Field', 'Method', 'Open Mean', 'Open Std', 'Closed Mean', 'Closed Std'});
+
+        row_idx = 1;
+        for field_idx = 1:length(ss_fields)
+            field = ss_fields{field_idx};
+            for method_idx = 1:n_methods
+                method = method_names{method_idx};
+                all_results(row_idx, :) = { ...
+                    string(field), ...
+                    string(method), ...
+                    calcs_open.(method).(field), ...
+                    calcs_open.(method).([field '_std']), ...
+                    calcs_closed.(method).(field), ...
+                    calcs_closed.(method).([field '_std'])};
+                row_idx = row_idx + 1;
+            end
+        end
+
+        writetable(all_results, 'ss_info_comparison.csv');
     end
 
 end
