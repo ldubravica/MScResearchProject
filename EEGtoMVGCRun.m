@@ -7,7 +7,7 @@ function [] = EEGtoMVGCRun()
         fprintf('\nRunning MVGC computation for format: %s\n', mvgc_format);
         
         % Set options and run the computation
-        EEGtoMVGCOptions(false, mvgc_format);
+        EEGtoMVGCOptions(false, mvgc_format, true);
         
         % Display completion message
         fprintf('MVGC computation for format "%s" completed.\n', mvgc_format);

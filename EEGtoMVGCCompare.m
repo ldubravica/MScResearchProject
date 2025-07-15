@@ -33,7 +33,7 @@ function [] = EEGtoMVGCCompare(output_csv, output_figures)
 
     % Compare ss_info parameters across methods
     info_to_compare = {'morder', 'rhoA', 'rhoB', 'acdec', 'sigspd', 'mii', 'mmii'};
-    info_descriptions = {'Model Order', 'Rho A', 'Rho B', 'Autocorrelation Decay', ...
+    info_descriptions = {'Model Order', 'Rho A', 'Rho B', 'Autocovariance Decay', ...
                          'Sigma SPD (the covariance matrix is symmetric positive definite)', ...
                          'Mutual Information Index', 'Multivariate Mutual Information Index'};
     compare_ss_info(method_names, info_to_compare, info_descriptions, output_csv);
@@ -72,20 +72,25 @@ function compare_mvgc_methods(method_names, fields_to_compare, output_csv, outpu
 
         for i = 1:n_methods
             for j = i+1:n_methods
-                v1 = matrix_vectors{i};
-                v2 = matrix_vectors{j};
-                mask = ~(isnan(v1) | isnan(v2));
-                if nnz(mask) > 0
-                    r = corr(v1(mask), v2(mask), 'type', 'Pearson');
-                    cosine_sim = dot(v1(mask), v2(mask)) / (norm(v1(mask)) * norm(v2(mask)));
-                    mse = mean((v1(mask) - v2(mask)).^2);
-                else
-                    r = NaN; cosine_sim = NaN; mse = NaN;
+                m1 = matrix_vectors{i};
+                m2 = matrix_vectors{j};
+                mask = ~isnan(m1) & ~isnan(m2);  % Mask to ignore NaNs
+
+                if nnz(mask) == 0
+                    continue;
                 end
 
-                corr_mat(i, j) = r; corr_mat(j, i) = r;
-                cosine_mat(i, j) = cosine_sim; cosine_mat(j, i) = cosine_sim;
-                mse_mat(i, j) = mse; mse_mat(j, i) = mse;
+                % Correlation
+                corr_mat(i,j) = corr(m1(mask), m2(mask), 'Rows', 'pairwise');
+                corr_mat(j,i) = corr_mat(i,j);  % Symmetric
+
+                % Cosine similarity
+                cosine_mat(i,j) = dot(m1(mask), m2(mask)) / (norm(m1(mask)) * norm(m2(mask)));
+                cosine_mat(j,i) = cosine_mat(i,j);  % Symmetric
+
+                % Mean Squared Error
+                mse_mat(i,j) = mean((m1(mask) - m2(mask)).^2, 'omitnan');
+                mse_mat(j,i) = mse_mat(i,j);  % Symmetric
             end
         end
 

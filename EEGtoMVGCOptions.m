@@ -1,4 +1,4 @@
-function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptions(load_mvgc_file, mvgc_format)
+function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptions(load_mvgc_file, mvgc_format, save_mvgc_file)
     
     % EEGtoMVGCOptions - Main function for EEG to MVGC analysis
     % Usage:
@@ -10,6 +10,9 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     end
     if nargin < 2 || isempty(mvgc_format)
         mvgc_format = 'source';  % Options: 'source', 'region', 'pca', 'brain_source'
+    end
+    if nargin < 3 || isempty(save_mvgc_file)
+        save_mvgc_file = false;  % Save results to .mat file
     end
 
     % filename = 'mvgc_values.mat';
@@ -149,10 +152,11 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         [ssmo, ~] = tsdata_to_sssvc(X, 2*varmo, [], []);
         [A, C, K, V] = tsdata_to_ss(X, 2*varmo, ssmo);
         info = ss_info(A, C, K, V, 1);
-        fprintf('  Sigma SPD: %d\n', info.sigspd);
+        % fprintf('  Sigma SPD: %d\n', info.sigspd);
 
         if info.error
-            fprintf('⚠️ SS model estimation encountered errors.\n');
+            % fprintf('⚠️ SS model estimation encountered errors.\n');
+            fprintf('⚠️ SS model estimation encountered errors: %s\n', dec2bin(info.error));
         else
             fprintf('SS model estimation successful.\n');
         end
@@ -450,9 +454,9 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     fprintf('\n*** AVERAGE MVGC DEPRESSED *** \n');
     disp(mvgc_depressed_avg);
 
-    %% Acquire corrected p-values and t-values for each MVGC matrix
+    %% Calculate p-values and t-values for each MVGC matrix
 
-    fprintf('\n*** ACQUIRING CORRECTED P-VALUES AND T-VALUES *** \n\n');
+    fprintf('\n*** CALCULATING P-VALUES AND T-VALUES *** \n\n');
 
     n_subjects = length(files);
 
@@ -503,10 +507,6 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
 
             map_idx = map_idx + 1;
 
-            disp('Region pair squeezes:')
-            disp(mvgc_r1_r2_open);
-            disp(mvgc_r1_r2_closed);
-
             fprintf('Region %d-%s to %d-%s: p_open = %.3f, t_open = %.3f, p_closed = %.3f, t_closed = %.3f\n', ...
                     r1, region_names{r1}, r2, region_names{r2}, p_open, t_open, p_closed, t_closed);
         end
@@ -519,51 +519,20 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         t = stats.tstat;
     end
 
-    % --- BASELINE ---
+    %% Correct p-values and mask t-values based on significance
 
-    % % === Apply FDR correction ===
+    fprintf('\n*** CORRECTING P-VALUES AND MASKING T-VALUES *** \n\n');
+
+    mvgc_open_pvals_corrected = NaN(n_regions, n_regions);
+    mvgc_closed_pvals_corrected = NaN(n_regions, n_regions);
+
+    % OPTION 1 - Apply FDR correction using fdr_bh
     % [~, ~, ~, open_fdr_pvals] = fdr_bh(open_p_list, 0.05, 'pdep', 'yes');
     % [~, ~, ~, closed_fdr_pvals] = fdr_bh(closed_p_list, 0.05, 'pdep', 'yes');
 
-    % % === Reassign corrected p-values back to matrices ===
-    % mvgc_open_pvals_corrected = NaN(n_regions, n_regions);
-    % mvgc_closed_pvals_corrected = NaN(n_regions, n_regions);
-
-    % disp(open_p_list);
-    % disp(closed_p_list);
-    % disp(open_fdr_pvals);
-    % disp(closed_fdr_pvals);
-    % % disp(index_map);
-
-    % for i = 1:(n_regions * (n_regions - 1))
-    %     r1 = index_map(i,1);
-    %     r2 = index_map(i,2);
-    %     mvgc_open_pvals_corrected(r1, r2) = open_fdr_pvals(i);
-    %     mvgc_closed_pvals_corrected(r1, r2) = closed_fdr_pvals(i);
-    %     % disp('mvgc_open_pvals_corrected:');
-    %     % disp(mvgc_open_pvals_corrected);
-    %     % disp(mvgc_closed_pvals_corrected);
-    %     % disp(r1);
-    %     % disp(r2)
-    % end
-
-    % % Optional: Mask t-values based on corrected significance (e.g., α = 0.05)
-    % alpha = 0.05;
-    % mvgc_open_tvals_masked = mvgc_open_tvals;
-    % mvgc_open_tvals_masked(mvgc_open_pvals_corrected > alpha) = 0;
-
-    % mvgc_closed_tvals_masked = mvgc_closed_tvals;
-    % mvgc_closed_tvals_masked(mvgc_closed_pvals_corrected > alpha) = 0;
-
-    % --- ALTERNATIVE ---
-
-    % === Apply FDR correction using mafdr ===
+    % OPTION 2 - Apply FDR correction using mafdr (same results as fdr_bh(open_p_list, 0.05, 'pdep', 'yes'))
     open_fdr_pvals = mafdr(open_p_list, 'BHFDR', true);
     closed_fdr_pvals = mafdr(closed_p_list, 'BHFDR', true);
-
-    % === Reassign corrected p-values back to matrices ===
-    mvgc_open_pvals_corrected = NaN(n_regions, n_regions);
-    mvgc_closed_pvals_corrected = NaN(n_regions, n_regions);
 
     for i = 1:(n_regions * (n_regions - 1))
         r1 = index_map(i,1);
@@ -572,7 +541,8 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         mvgc_closed_pvals_corrected(r1, r2) = closed_fdr_pvals(i);
     end
 
-    % === Mask t-values based on corrected significance (e.g., α = 0.05) ===
+    % Mask t-values based on corrected significance (e.g., α = 0.05)
+
     alpha = 0.05;
     mvgc_open_tvals_masked = mvgc_open_tvals;
     mvgc_open_tvals_masked(mvgc_open_pvals_corrected > alpha) = 0;
@@ -608,16 +578,18 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
                   'Open Masked T-Values', 'Closed Masked T-Values'};
     
     mvgc_p_t = {mvgc_open_pvals_corrected, mvgc_closed_pvals_corrected, mvgc_open_tvals_masked, mvgc_closed_tvals_masked};
+    % mvgc_p_t = {mvgc_open_pvals_corrected, mvgc_closed_pvals_corrected, mvgc_open_tvals, mvgc_closed_tvals};
 
     mvgc_p_t_title = sprintf('MVGC P-Values and T-Values (%s)', mvgc_format);
-    plot_mvgc(mvgc_p_t, region_names, plot_titles, mvgc_p_t_title, [0.05, 0.05, 1.7, 1.7]);
+    % plot_mvgc(mvgc_p_t, region_names, plot_titles, mvgc_p_t_title, [0.05, 0.05, 1.7, 1.7]);
+    plot_mvgc(mvgc_p_t, region_names, plot_titles, mvgc_p_t_title, []);
 
     %% Plot differences between MVGC matrices
 
-    mvgc_open_avg_diff = abs(mvgc_open_healthy_avg - mvgc_open_depressed_avg);
-    mvgc_closed_avg_diff = abs(mvgc_closed_healthy_avg - mvgc_closed_depressed_avg);
-    mvgc_eyes_diff = abs(mvgc_open_avg - mvgc_closed_avg);
-    mvgc_health_diff = abs(mvgc_healthy_avg - mvgc_depressed_avg);
+    mvgc_open_avg_diff = mvgc_open_healthy_avg - mvgc_open_depressed_avg;
+    mvgc_closed_avg_diff = mvgc_closed_healthy_avg - mvgc_closed_depressed_avg;
+    mvgc_eyes_diff = mvgc_open_avg - mvgc_closed_avg;
+    mvgc_health_diff = mvgc_healthy_avg - mvgc_depressed_avg;
 
     mvgc_diff = {mvgc_open_avg_diff, mvgc_closed_avg_diff, mvgc_eyes_diff, mvgc_health_diff};
     diff_titles = {'Open Healthy vs Open Depressed', 'Closed Healthy vs Closed Depressed', 'Open vs Closed', 'Healthy vs Depressed'};
@@ -663,7 +635,7 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
             end
 
             % Mark significant differences with stars
-            if ~isempty(signif_threshs) && signif_threshs(i) ~= 0
+            if ~isempty(signif_threshs)
                 hold on;
                 for r = 1:length(region_names)
                     for c = 1:length(region_names)
@@ -694,7 +666,10 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
 
     %% Save results into .mat files
 
-    save(fullfile(filename), ...
+    if save_mvgc_file
+        fprintf('\n*** SAVING MVGC RESULTS TO %s *** \n', filename);
+
+        save(fullfile(filename), ...
          'mvgc_open', 'mvgc_closed', ...
          'mvgc_open_healthy', 'mvgc_closed_healthy', ...
          'mvgc_open_depressed', 'mvgc_closed_depressed', ...
@@ -708,6 +683,9 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
          'mvgc_open_tvals_masked', 'mvgc_closed_tvals_masked', ...
          'ss_info_open', 'ss_info_closed');
 
-    fprintf('\n*** FILES SAVED *** \n');
+        fprintf('\n*** FILES SAVED *** \n');
+    else
+        fprintf('\n*** NOT SAVING MVGC RESULTS *** \n');
+    end
 
 end
