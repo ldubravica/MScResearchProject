@@ -1,18 +1,23 @@
-function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptions(load_mvgc_file, mvgc_format, save_mvgc_file)
+function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptions(mvgc_format, load_mvgc_file, save_mvgc_file, plot_data, save_plots)
     
     % EEGtoMVGCOptions - Main function for EEG to MVGC analysis
     % Usage:
-    %   EEGtoMVGCOptions() % uses defaults: load_mvgc_file=false, mvgc_format='source'
-    %   EEGtoMVGCOptions(true, 'region')
+    %   EEGtoMVGCOptions('region')
 
-    if nargin < 1 || isempty(load_mvgc_file)
-        load_mvgc_file = false;
-    end
-    if nargin < 2 || isempty(mvgc_format)
+    if nargin < 1 || isempty(mvgc_format)
         mvgc_format = 'source';  % Options: 'source', 'region', 'pca', 'brain_source'
+    end
+    if nargin < 2 || isempty(load_mvgc_file)
+        load_mvgc_file = false;
     end
     if nargin < 3 || isempty(save_mvgc_file)
         save_mvgc_file = false;  % Save results to .mat file
+    end
+    if nargin < 4 || isempty(plot_data)
+        plot_data = false;  % Plot results
+    end
+    if nargin < 5 || isempty(save_plots)
+        save_plots = false;  % Save plots to files
     end
 
     % filename = 'mvgc_values.mat';
@@ -49,6 +54,8 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     region_names = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
     region_indices = {frontal, occipital, parietal, sensorimotor, temporal};
     n_regions = 5;
+
+    n_subjects = length(files);
 
     %% Perform source reconstruction, rotation, prep and MVGC calculation for each subject
 
@@ -454,11 +461,15 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     fprintf('\n*** AVERAGE MVGC DEPRESSED *** \n');
     disp(mvgc_depressed_avg);
 
+    %% Load Depression_Study\depression_data\Data_4_Import_REST.xlsx
+
+    excelFile = fullfile('Depression_Study', 'depression_data', 'Data_4_Import_REST.xlsx');
+    T = readtable(excelFile);
+    % T.id, T.MDD, T.sex, T.age, T.BDI, T.BDI_Anh, T.BDI_Mel, T.TAI
+
     %% Calculate p-values and t-values for each MVGC matrix
 
     fprintf('\n*** CALCULATING P-VALUES AND T-VALUES *** \n\n');
-
-    n_subjects = length(files);
 
     % Convert MVGC struct to 3D matrix
     mvgc_open_3d   = struct_to_3d(mvgc_open);
@@ -519,6 +530,89 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
         t = stats.tstat;
     end
 
+    %% Calculate p-values and t-values using Robust Linear Model
+
+    fprintf('\n*** CALCULATING ROBUST LINEAR MODEL P-VALUES AND T-VALUES *** \n\n');
+
+    % Prepare subject IDs from file names
+    subject_ids = zeros(n_subjects, 1);
+    for i = 1:n_subjects
+        subject_ids(i) = str2double(files(i).name(1:3));
+    end
+    % Find indices in T corresponding to subject_ids
+    [~, T_idx] = ismember(subject_ids, T.id);
+
+    % Extract covariates
+    sex = T.sex(T_idx) - 1; % shift to 0-1 binary
+    age = T.age(T_idx);
+    depressed = depressed_binary_labels';
+
+    % Initialize matrices
+    mvgc_open_rlm_pvals_included = zeros(n_regions, n_regions);
+    mvgc_open_rlm_tvals_included = zeros(n_regions, n_regions);
+    mvgc_closed_rlm_pvals_included = zeros(n_regions, n_regions);
+    mvgc_closed_rlm_tvals_included = zeros(n_regions, n_regions);
+
+    mvgc_open_rlm_pvals_residuals = zeros(n_regions, n_regions);
+    mvgc_open_rlm_tvals_residuals = zeros(n_regions, n_regions);
+    mvgc_closed_rlm_pvals_residuals = zeros(n_regions, n_regions);
+    mvgc_closed_rlm_tvals_residuals = zeros(n_regions, n_regions);
+
+    for r1 = 1:n_regions
+        for r2 = 1:n_regions
+            if r1 == r2
+                continue;
+            end
+
+            fprintf('\n** RLM (%d-%s -> %d-%s) **\n', r1, region_names{r1}, r2, region_names{r2});
+
+            % Open condition
+            y_open = squeeze(mvgc_open_3d(r1, r2, :)); % 119 x 1
+
+            % Open condition - residuals
+            tbl_open = table(y_open, sex, age, 'VariableNames', {'MVGC','Sex','Age'});
+            mdl_open = fitlm(tbl_open, 'MVGC ~ Sex + Age', 'RobustOpts', 'on');
+            residuals = mdl_open.Residuals.Raw;  % 119 x 1
+
+            healthy = residuals(depressed_binary_labels == 0);
+            depressed = residuals(depressed_binary_labels == 1);
+            [~, p, ~, stats] = ttest2(healthy, depressed);
+            t = stats.tstat;
+            mvgc_open_rlm_pvals_residuals(r1, r2) = p;
+            mvgc_open_rlm_tvals_residuals(r1, r2) = t;
+
+            % Open condition - with Depressed covariate
+            tbl_open = table(y_open, sex, age, depressed, 'VariableNames', {'MVGC','Sex','Age','Depressed'});
+            mdl_open = fitlm(tbl_open, 'MVGC ~ Sex + Age + Depressed', 'RobustOpts', 'on');
+            coef_open = mdl_open.Coefficients;
+            mvgc_open_rlm_pvals_included(r1, r2) = coef_open.pValue(4); % Depressed p-value
+            mvgc_open_rlm_tvals_included(r1, r2) = coef_open.tStat(4);  % Depressed t-value
+
+            % Closed condition
+            y_closed = squeeze(mvgc_closed_3d(r1, r2, :));  % 119 x 1
+
+            % Closed condition - residuals
+            tbl_closed = table(y_closed, sex, age, 'VariableNames', {'MVGC','Sex','Age'});
+            mdl_closed = fitlm(tbl_closed, 'MVGC ~ Sex + Age', 'RobustOpts', 'on');
+            residuals = mdl_closed.Residuals.Raw; % 119 x 1
+
+            healthy = residuals(depressed_binary_labels == 0);
+            depressed = residuals(depressed_binary_labels == 1);
+            [~, p, ~, stats] = ttest2(healthy, depressed);
+            t = stats.tstat;
+            mvgc_closed_rlm_pvals_residuals(r1, r2) = p;
+            mvgc_closed_rlm_tvals_residuals(r1, r2) = t;
+
+            % Closed condition - with Depressed covariate
+            tbl_closed = table(y_closed, sex, age, depressed, 'VariableNames', {'MVGC','Sex','Age','Depressed'});
+            mdl_closed = fitlm(tbl_closed, 'MVGC ~ Sex + Age + Depressed', 'RobustOpts', 'on');
+            coef_closed = mdl_closed.Coefficients;
+            mvgc_closed_rlm_pvals_included(r1, r2) = coef_closed.pValue(4); % Depressed p-value
+            mvgc_closed_rlm_tvals_included(r1, r2) = coef_closed.tStat(4);  % Depressed t-value
+
+        end
+    end
+
     %% Correct p-values and mask t-values based on significance
 
     fprintf('\n*** CORRECTING P-VALUES AND MASKING T-VALUES *** \n\n');
@@ -550,54 +644,85 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
     mvgc_closed_tvals_masked = mvgc_closed_tvals;
     mvgc_closed_tvals_masked(mvgc_closed_pvals_corrected > alpha) = 0;
 
-    % --- Display results ---
+    %% Display p-value & t-value results
 
     disp('mvgc_open_pvals:');
     disp(mvgc_open_pvals);
-    disp('mvgc_closed_pvals:');
-    disp(mvgc_closed_pvals);
-
     disp('mvgc_open_pvals_corrected:');
     disp(mvgc_open_pvals_corrected);
+    disp('mvgc_open_rlm_pvals_included:');
+    disp(mvgc_open_rlm_pvals_included);
+    disp('mvgc_open_rlm_pvals_residuals:');
+    disp(mvgc_open_rlm_pvals_residuals);
+
+    disp('mvgc_closed_pvals:');
+    disp(mvgc_closed_pvals);
     disp('mvgc_closed_pvals_corrected:');
     disp(mvgc_closed_pvals_corrected);
+    disp('mvgc_closed_rlm_pvals_included:');
+    disp(mvgc_closed_rlm_pvals_included);
+    disp('mvgc_closed_rlm_pvals_residuals:');
+    disp(mvgc_closed_rlm_pvals_residuals);
 
     disp('mvgc_open_tvals:');
     disp(mvgc_open_tvals);
-    disp('mvgc_closed_tvals:');
-    disp(mvgc_closed_tvals);
-
     disp('mvgc_open_tvals_masked:');
     disp(mvgc_open_tvals_masked);
+    disp('mvgc_open_rlm_tvals_included:');
+    disp(mvgc_open_rlm_tvals_included);
+    disp('mvgc_open_rlm_tvals_residuals:');
+    disp(mvgc_open_rlm_tvals_residuals);
+
+    disp('mvgc_closed_tvals:');
+    disp(mvgc_closed_tvals);
     disp('mvgc_closed_tvals_masked:');
     disp(mvgc_closed_tvals_masked);
+    disp('mvgc_closed_rlm_tvals_included:');
+    disp(mvgc_closed_rlm_tvals_included);
+    disp('mvgc_closed_rlm_tvals_residuals:');
+    disp(mvgc_closed_rlm_tvals_residuals);
 
-    %% Plot p-values and t-values for each MVGC matrix
-
-    plot_titles = {'Open Corrected P-Values', 'Closed Corrected P-Values', ...
-                  'Open Masked T-Values', 'Closed Masked T-Values'};
+    %% Plotting matrices
     
-    mvgc_p_t = {mvgc_open_pvals_corrected, mvgc_closed_pvals_corrected, mvgc_open_tvals_masked, mvgc_closed_tvals_masked};
-    % mvgc_p_t = {mvgc_open_pvals_corrected, mvgc_closed_pvals_corrected, mvgc_open_tvals, mvgc_closed_tvals};
+    % Plot t-test p-values and t-values
 
-    mvgc_p_t_title = sprintf('MVGC P-Values and T-Values (%s)', mvgc_format);
-    % plot_mvgc(mvgc_p_t, region_names, plot_titles, mvgc_p_t_title, [0.05, 0.05, 1.7, 1.7]);
-    plot_mvgc(mvgc_p_t, region_names, plot_titles, mvgc_p_t_title, []);
+    % plot_mvgc(...
+    %     {mvgc_open_pvals_corrected, mvgc_closed_pvals_corrected, mvgc_open_tvals_masked, mvgc_closed_tvals_masked}, ...
+    %     {'Open Corrected P-Values', 'Closed Corrected P-Values', 'Open Masked T-Values', 'Closed Masked T-Values'}, ...
+    %     sprintf('MVGC P-Values and T-Values (%s)', strrep(mvgc_format, '_', ' ')));
 
-    %% Plot differences between MVGC matrices
+    % Plot RLM p-values and t-values
+
+    plot_mvgc(...
+        {mvgc_open_pvals, mvgc_open_rlm_pvals_included, mvgc_open_rlm_pvals_residuals, ...
+         mvgc_closed_pvals, mvgc_closed_rlm_pvals_included, mvgc_closed_rlm_pvals_residuals}, ...
+        {'Open (ttest2)', 'Open RLM (Sex+Age+Depression)', 'Open RLM (Residuals)', ...
+         'Closed (ttest2)', 'Closed RLM (Sex+Age+Depression)', 'Closed RLM (Residuals)'}, ...
+        sprintf('MVGC P-Values (%s)', strrep(mvgc_format, '_', ' ')));
+
+    % Plot differences between MVGC matrices
 
     mvgc_open_avg_diff = mvgc_open_healthy_avg - mvgc_open_depressed_avg;
     mvgc_closed_avg_diff = mvgc_closed_healthy_avg - mvgc_closed_depressed_avg;
     mvgc_eyes_diff = mvgc_open_avg - mvgc_closed_avg;
     mvgc_health_diff = mvgc_healthy_avg - mvgc_depressed_avg;
 
-    mvgc_diff = {mvgc_open_avg_diff, mvgc_closed_avg_diff, mvgc_eyes_diff, mvgc_health_diff};
-    diff_titles = {'Open Healthy vs Open Depressed', 'Closed Healthy vs Closed Depressed', 'Open vs Closed', 'Healthy vs Depressed'};
+    % plot_mvgc(...
+    %     {mvgc_open_avg_diff, mvgc_closed_avg_diff, mvgc_eyes_diff, mvgc_health_diff}, ...
+    %     {'Open Healthy vs Open Depressed', 'Closed Healthy vs Closed Depressed', 'Open vs Closed', 'Healthy vs Depressed'}, ...
+    %     sprintf('MVGC Differences (%s)', strrep(mvgc_format, '_', ' ')));
 
-    mvgc_diff_title = sprintf('MVGC Differences (%s)', mvgc_format);
-    plot_mvgc(mvgc_diff, region_names, diff_titles, mvgc_diff_title, []);
+    % Plot Function
 
-    function plot_mvgc(mvgc_matrices, region_names, titles, super_title, signif_threshs)
+    function plot_mvgc(mvgc_matrices, titles, super_title, signif_threshs)
+        if ~plot_data
+            return;
+        end
+
+        if nargin < 4
+            signif_threshs = [];
+        end
+
         % Find global color limits
         num_matrices = numel(mvgc_matrices);
         mat_size = numel(mvgc_matrices{1});
@@ -616,6 +741,9 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
             end
             if numel(mvgc_matrices) == 4
                 subplot(2, 2, i)
+            end
+            if numel(mvgc_matrices) == 6
+                subplot(2, 3, i)
             end
             imagesc(mvgc_matrices{i}, clim);
             colorbar;
@@ -647,22 +775,17 @@ function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGCOptio
             end
         end
         sgtitle(super_title);
+
+        if (save_plots)
+            if ~exist(fullfile('output', 'images'), 'dir')
+                mkdir(fullfile('output', 'images'));
+            end
+            filename = sprintf('%s - %s.png', super_title, datetime('now', 'Format', 'yyyy_MM_dd'));
+            saveas(gcf, fullfile('output', 'images', filename));
+            % close(gcf);  % Close the figure after saving
+        end
         
     end
-
-    %% Plot average MVGC matrices across open/closed healthy/depressed subjects
-
-    % plot_mvgc(...
-    %     {mvgc_open_healthy_avg, mvgc_open_depressed_avg, mvgc_closed_healthy_avg, mvgc_closed_depressed_avg}, ...
-    %     region_names, ...
-    %     {'Open Healthy', 'Open Depressed', 'Closed Healthy', 'Closed Depressed'}, ...
-    %     'Average MVGC Matrices');
-
-    % plot_mvgc(...
-    %     {mvgc_open_avg, mvgc_closed_avg, mvgc_healthy_avg, mvgc_depressed_avg}, ...
-    %     region_names, ...
-    %     {'Open', 'Closed', 'Healthy', 'Depressed'}, ...
-    %     'Average MVGC Matrices');
 
     %% Save results into .mat files
 
