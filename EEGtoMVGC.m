@@ -1,5 +1,9 @@
 function [mvgc_open, mvgc_closed, ss_info_open, ss_info_closed] = EEGtoMVGC()
 
+    % Luka Dubravica, 2025
+    % Supervised by Hardik Rajpal and Alberto Liardi
+    % Inspired by Pedro Mediano's code
+
     %% Load .mat and .m files
 
     dataDir = fullfile('Depression_Study', 'export_mat'); % TEST directory

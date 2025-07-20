@@ -1,5 +1,8 @@
 function [] = EEGtoMVGCRun()
 
+    % Luka Dubravica, 2025
+    % Supervised by Hardik Rajpal and Alberto Liardi
+
     mvgc_formats = {'brain_source', 'region', 'pca', 'source'};
 
     for i = 1:length(mvgc_formats)

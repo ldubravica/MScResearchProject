@@ -1,5 +1,8 @@
 function [] = EEGtoMVGCCompare(output_csv, output_figures)
 
+    % Luka Dubravica, 2025
+    % Supervised by Hardik Rajpal and Alberto Liardi
+
     if nargin < 1 || isempty(output_csv)
         output_csv = false;
     end
