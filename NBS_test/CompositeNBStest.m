@@ -22,8 +22,6 @@ nb_tests = length(UI_structs);
 % Silently add NBS to current path
 % p = mfilename('fullpath');
 % addpath(strrep(p, 'CompositeNBStest', 'private/NBS_v1.2'));
-% addpath('./NBS1.2/');
-addpath('./NBS_test/NBS1.2/');
 
 % Check that stats configuration and input dimension match across datasets
 for j=2:nb_tests

@@ -28,5 +28,6 @@ lz76/*
 !lz76/setup.py
 
 NBS_test/NBS1.2
+NBS_test/NBS_v1.2
 
 output/

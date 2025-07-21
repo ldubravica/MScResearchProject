@@ -1,252 +1,249 @@
-function [n_cnt, con_mat, pval] = NBSmultistats(STATS)
-%NBSMULTISTATS Network-Based Statistic for multiple test statistics
+function [n_cnt, con_mat, pval] = NBSmultistats(STATS, GLM)
+%%NBSMULTISTATS Cluster statistics for composite NBS tests
 %
-%   [N_CNT, CON_MAT, PVAL] = NBSMULTISTATS(STATS) computes network 
-%   components where ALL test statistics in the cell array STATS exceed 
-%   their respective thresholds. This implements a composite hypothesis 
-%   test where clusters must be significant across multiple conditions.
+%   [N_CNT, CON_MAT, PVAL] = NBSMULTISTATS(STATS) computes cluster statistics
+%   and null distribution of composite test given by 1D cell array STATS.
 %
-%   Input:
-%       STATS:      Cell array of STATS structures, each containing:
-%                   - test_stat: Test statistics matrix
-%                   - thresh: Primary threshold
-%                   - alpha: Significance level
-%                   - N: Number of nodes
-%                   - size: 'Extent' or 'Intensity'
+%   [...] = NBSMULTISTATS(STATS, GLM) uses GLM to compute test statistics on
+%   the fly, as in NBSSTATS. Slower, but saves memory.
 %
-%   Output:
-%       N_CNT:      Number of significant components
-%       CON_MAT:    Cell array of adjacency matrices for significant components
-%       PVAL:       P-values for each significant component
+%   This code is based on NBSstats.m from the NBS library (tested with v1.2).
+%   Reference:
 %
-%   This function extends NBSstats to handle composite hypotheses where
-%   edges must survive thresholding in ALL test statistics.
+%     https://www.nitrc.org/projects/nbs/
+%
+%   WARNING: this function assumes that data has already been checked by
+%   CompositeNBStest() in terms of network size, clustering criterion, etc.
+%
+% Pedro Mediano, Oct 2020
 
-%% Initialize
+
+%% Parameter checks and initialisation
+
+%Is BGL available?
+bgl=0;
+if exist('components','file')==2
+    %Use components.m provided by MatlabBGL, otherwise use get_components.m
+    bgl=1;
+end
+
+%Number of nodes
+N = STATS{1}.N; 
+
+%Number of edges
+J = N*(N-1)/2;
+
+% Number of tests
 nb_tests = length(STATS);
-if nb_tests == 0
-    error('STATS cell array cannot be empty');
-end
 
-% Get dimensions from first test
-N = STATS{1}.N;
-J = N * (N - 1) / 2;
-ind_upper = find(triu(ones(N, N), 1));
 
-% Check all tests have same dimensions and parameters
-for i = 2:nb_tests
-    if STATS{i}.N ~= N
-        error('All tests must have the same number of nodes');
-    end
-    if ~strcmp(STATS{1}.size, STATS{i}.size)
-        error('All tests must use the same size measure');
-    end
-end
+% Check if network is undirected by comparing number of dependent variables and
+% number of nodes.
+is_net_undirected = all(cellfun(@(s) size(s.test_stat, 2) == J, STATS));
 
-% Get number of permutations (should be same for all tests)
-K = size(STATS{1}.test_stat, 1) - 1;
 
-%% Find edges that survive ALL thresholds (composite hypothesis)
-% For observed data (first row)
-surviving_edges = true(1, J);
-for i = 1:nb_tests
-    test_stat_row = STATS{i}.test_stat(1, :);
-    thresh_val = STATS{i}.thresh;
-    % Ensure thresh is scalar or same size as test_stat_row
-    if isscalar(thresh_val)
-        surviving_edges = surviving_edges & (test_stat_row > thresh_val);
-    else
-        % Ensure thresh_val is same size as test_stat_row
-        if length(thresh_val) == length(test_stat_row)
-            surviving_edges = surviving_edges & (test_stat_row > thresh_val(:)');
-        else
-            error('Threshold dimensions must match test statistic dimensions');
-        end
-    end
-end
-ind_observed = ind_upper(surviving_edges);
-
-%% Set up component size measurement
-Intensity = strcmp(STATS{1}.size, 'Intensity');
-
-if Intensity
-    % Create composite test statistic matrix for intensity measurement
-    test_stat_mat_obs = zeros(N, N);
-    for i = 1:nb_tests
-        temp_mat = zeros(N, N);
-        temp_mat(ind_upper) = STATS{i}.test_stat(1, :) - STATS{i}.thresh;
-        test_stat_mat_obs = test_stat_mat_obs + temp_mat;
-    end
-    test_stat_mat_obs = (test_stat_mat_obs + test_stat_mat_obs') / nb_tests;
-end
-
-%% Find components in observed data
-adj_obs = sparse(N, N);
-adj_obs(ind_observed) = 1;
-adj_obs = adj_obs + adj_obs';
-
-% Find connected components
-if exist('components', 'file') == 2
-    [a, sz] = components(adj_obs);
+% Index of elements in the matrix to test: upper triangular if undirected, all
+% except diagonal if directed
+if is_net_undirected
+  ind_fun = @(n) triu(ones(n), 1);
 else
-    [a, sz] = get_components(adj_obs);
+  ind_fun = @(n) ones(n) - eye(n);
 end
 
-% Only consider components with more than one node (at least one edge)
-ind_sz = find(sz > 1);
-sz_links_obs = zeros(1, length(ind_sz));
-max_sz_obs = 0;
+ind_upper = find(ind_fun(N))';
 
-for i = 1:length(ind_sz)
-    nodes = find(ind_sz(i) == a);
+
+%% Step 1: find edges where all test statistics are above threshold
+
+% Determine whether test statistics have been precomputed and determine
+% index of edges exceeding the primary threshold for each dataset
+ind = 1:(N*N);
+for k=1:nb_tests
+  if ~isempty(STATS{k}.test_stat)
+      %Precomputed test statistics
+      ind = intersect(ind, ind_upper(STATS{k}.test_stat(1,:) > STATS{k}.thresh)); 
+      %Number of permutations
+      K = size(STATS{k}.test_stat,1)-1; 
+  else
+      %Compute test statistics on the fly
+      %Get desired number of permutations
+      K = GLM{k}.perms;
+      %Set to 1, since NBSglm will be called separately for each permutation
+      GLM{k}.perms = 1; 
+      test_stat{k} = NBSglm(GLM{k});  
+      ind = intersect(ind, ind_upper(test_stat{k}(1,:) > STATS{k}.thresh));
+  end
+end
+
+%Size of a component measured using extent or intensity? 
+Intensity=0;
+if strcmp(STATS{1}.size,'Intensity')    
+    %If size measure using intensity, create an N x N matrix cotaining the 
+    %test statistic for each edge minus the test statistic threshold
+    %(primary threshold)
+    Intensity = 1; 
+    %Compute a test statistic matrix
+    test_stat_mat = zeros(N,N); 
+
+    % Test statistic is the minimum across all individual tests
+    test_stat_mat(ind_upper) = inf;
+    for k=1:nb_tests
+      if ~isempty(STATS{k}.test_stat)
+          %Precomputed
+          test_stat_mat(ind_upper) = min(test_stat_mat(ind_upper), STATS{k}.test_stat(1,:) - STATS{k}.thresh);
+      else
+          %Not precomputed
+          test_stat_mat(ind_upper) = min(test_stat_mat(ind_upper), test_stat{k}(1,:) - STATS{k}.thresh);
+      end
+    end
+
+    if is_net_undirected
+      test_stat_mat = (test_stat_mat+test_stat_mat');
+    end
+end
+
+
+%% Step 2: compute cluster stats for real (unshuffled) data
+
+adj=spalloc(N,N,length(ind)*2);
+adj(ind) = 1;
+if is_net_undirected
+  adj = adj + adj';
+end
+%Only consider components comprising more than one node, equivalent to at
+%least one edge
+if bgl==1
+    [a,sz]=components(adj | adj');
+else
+    [a,sz]=get_components(adj | adj');
+end
+ind_sz=find(sz>1);
+sz_links=zeros(1,length(ind_sz));
+max_sz=0; 
+for i=1:length(ind_sz)
+    nodes=find(ind_sz(i)==a);
     if Intensity
-        sz_links_obs(i) = sum(sum(adj_obs(nodes, nodes) .* test_stat_mat_obs(nodes, nodes))) / 2;
+        %Measure size as intensity
+        sz_links(i)=sum(sum(adj(nodes,nodes).*test_stat_mat(nodes,nodes)))/2;
     else
-        sz_links_obs(i) = sum(sum(adj_obs(nodes, nodes))) / 2;
+        %Measure size as extent
+        sz_links(i)=sum(sum(adj(nodes,nodes)))/2;
     end
-    adj_obs(nodes, nodes) = adj_obs(nodes, nodes) * (i + 1);
-    if max_sz_obs < sz_links_obs(i)
-        max_sz_obs = sz_links_obs(i);
+    adj(nodes,nodes)=adj(nodes,nodes)*(i+1);
+    if max_sz<sz_links(i)
+        max_sz=sz_links(i);
     end
 end
 
-% Adjust adjacency matrix indexing
-    % Find edges surviving ALL thresholds in this permutation
-    surviving_edges_perm = true(1, J);
-    for i = 1:nb_tests
-        test_stat_row = STATS{i}.test_stat(perm, :);
-        thresh_val = STATS{i}.thresh;
-        % Ensure thresh is scalar or same size as test_stat_row
-        if isscalar(thresh_val)
-            surviving_edges_perm = surviving_edges_perm & (test_stat_row > thresh_val);
-        else
-            surviving_edges_perm = surviving_edges_perm & (test_stat_row > thresh_val(:)');
-        end
-    end
-for perm = 2:K+1
-    % Find edges surviving ALL thresholds in this permutation
-    surviving_edges_perm = true(1, J);
-    for i = 1:nb_tests
-        surviving_edges_perm = surviving_edges_perm & ...
-            (STATS{i}.test_stat(perm, :) > STATS{i}.thresh);
-    end
-    ind_perm = ind_upper(surviving_edges_perm);
-    
-    if Intensity
-        % Create composite test statistic matrix for this permutation
-        test_stat_mat_perm = zeros(N, N);
-        for i = 1:nb_tests
-            temp_mat = zeros(N, N);
-            temp_mat(ind_upper) = STATS{i}.test_stat(perm, :) - STATS{i}.thresh;
-            test_stat_mat_perm = test_stat_mat_perm + temp_mat;
-        end
-        test_stat_mat_perm = (test_stat_mat_perm + test_stat_mat_perm') / nb_tests;
-    end
-    
-    % Create adjacency matrix for this permutation
-    adj_perm = sparse(N, N);
-    adj_perm(ind_perm) = 1;
-    adj_perm = adj_perm + adj_perm';
-    
-    % Find components
-    if exist('components', 'file') == 2
-        [a_perm, sz_perm] = components(adj_perm);
+%Subtract one to remove edges not part of a component
+%Although one is also subtracted from edges comprising a component, this is 
+%compensated by the (i+1) above
+adj(~~adj)=adj(~~adj)-1;
+
+
+%% Step 3: repeat for shuffled data
+
+%Repeat above for each permutation
+%Empirical null distribution of maximum component size
+null_dist=zeros(K,1); 
+p_approx=0;
+%First row of test_stat is the observed test statistics, so start at the
+%second row
+for i=2:K+1
+
+
+    % Randomly pick one dataset to shuffle, keep the others intact. The point
+    % behind shuffling exactly one dataset is that it is the strongest null
+    % hypothesis in which not all tests are significant.
+    surr_idx = ones([1, nb_tests]);
+    shuf_idx = randi(nb_tests);
+    if ~isempty(STATS{shuf_idx}.test_stat)
+        surr_idx(shuf_idx) = i;
     else
-        [a_perm, sz_perm] = get_components(adj_perm);
+        surr_idx(shuf_idx) = 2;
     end
-    
-    % Find maximum component size in this permutation
-    ind_sz_perm = find(sz_perm > 1);
-    max_sz_perm = 0;
-    
-    for j = 1:length(ind_sz_perm)
-        nodes = find(ind_sz_perm(j) == a_perm);
-        if Intensity
-            tmp = sum(sum(adj_perm(nodes, nodes) .* test_stat_mat_perm(nodes, nodes))) / 2;
+
+
+    % Compute test statistic matrix for composite test
+    ind = 1:(N*N);
+    test_stat_mat = zeros(N,N); 
+    test_stat = {};
+    for k=1:nb_tests
+        if ~isempty(STATS{k}.test_stat)
+            %Precomputed test statistics 
+            ind = intersect(ind, ind_upper(STATS{k}.test_stat(surr_idx(k),:) > STATS{k}.thresh)); 
         else
-            tmp = sum(sum(adj_perm(nodes, nodes))) / 2;
-        end
-        if tmp > max_sz_perm
-            max_sz_perm = full(tmp);
-        end
-    end
-    
-    null_dist(perm - 1) = max_sz_perm;
-    
-    if mod(perm - 1, 500) == 0
-        fprintf('Completed %d/%d permutations\n', perm - 1, K);
-    end
-end
-
-%% Determine significant components
-n_cnt = 0;
-con_mat = {};
-pval = [];
-
-alpha = STATS{1}.alpha; % Use alpha from first test (should be same for all)
-
-for i = 1:length(sz_links_obs)
-    p_val = sum(null_dist >= sz_links_obs(i)) / K;
-    if p_val <= alpha
-        n_cnt = n_cnt + 1;
-        
-        % Create adjacency matrix for this significant component
-        ind_component = find(adj_obs == i);
-        con_mat{n_cnt} = sparse(N, N);
-        con_mat{n_cnt}(ind_component) = 1;
-        con_mat{n_cnt} = triu(con_mat{n_cnt}, 1);
-        
-        pval(n_cnt) = p_val;
-    end
-end
-
-if n_cnt == 0
-    con_mat = {};
-    pval = [];
-end
-
-fprintf('Found %d significant components\n', n_cnt);
-
-end
-
-
-%% Helper function for connected components (if MatlabBGL not available)
-function [a, sz] = get_components(adj)
-    N = size(adj, 1);
-    a = zeros(N, 1);
-    sz = [];
-    component_id = 0;
-    
-    for i = 1:N
-        if a(i) == 0  % Unvisited node
-            component_id = component_id + 1;
-            component_nodes = dfs(adj, i, N);
-            a(component_nodes) = component_id;
-            sz(component_id) = length(component_nodes);
+            %Compute on the fly
+            test_stat{k} = NBSglm(GLM{k});
+            ind = intersect(ind, ind_upper(test_stat{k}(surr_idx(k),:) > STATS{k}.thresh));
         end
     end
-end
 
-function component_nodes = dfs(adj, start_node, N)
-    visited = false(N, 1);
-    stack = start_node;
-    component_nodes = [];
-    
-    while ~isempty(stack)
-        node = stack(end);
-        stack(end) = [];
-        
-        if ~visited(node)
-            visited(node) = true;
-            component_nodes = [component_nodes, node];
-            
-            % Add unvisited neighbors to stack
-            neighbors = find(adj(node, :));
-            for neighbor = neighbors
-                if ~visited(neighbor)
-                    stack = [stack, neighbor];
-                end
+
+    % Test statistic is the minimum across all individual tests
+    test_stat_mat(ind_upper) = inf;
+    for k=1:nb_tests
+        %Compute a test statistic matrix
+        if Intensity 
+            if ~isempty(STATS{k}.test_stat)
+                test_stat_mat(ind_upper) = min(test_stat_mat(ind_upper), STATS{k}.test_stat(surr_idx(k),:) - STATS{k}.thresh);
+            else
+                test_stat_mat(ind_upper) = min(test_stat_mat(ind_upper), test_stat{k}(surr_idx(k),:) - STATS{k}.thresh);
             end
         end
     end
+
+    if is_net_undirected
+      test_stat_mat = (test_stat_mat+test_stat_mat');
+    end
+
+    % Cluster, compute cluster statistics and save to null distribution
+    adj_perm=spalloc(N,N,length(ind)*2);
+    adj_perm(ind) = 1;
+    if bgl==1
+        [a,sz]=components(adj_perm | adj_perm');
+    else
+        [a,sz]=get_components(adj_perm | adj_perm');
+    end
+    ind_sz=find(sz>1);
+    max_sz_perm=0; 
+    for j=1:length(ind_sz)
+        nodes=find(ind_sz(j)==a);
+        if Intensity
+            tmp=sum(sum(adj_perm(nodes,nodes).*test_stat_mat(nodes,nodes)))/2;
+        else
+            tmp=sum(sum(adj_perm(nodes,nodes)))/2;
+        end
+        if tmp>max_sz_perm
+            max_sz_perm=full(tmp);
+        end   
+    end
+    null_dist(i-1)=max_sz_perm; 
+    if max_sz_perm>=max_sz
+        p_approx=p_approx+1;
+    end
+end
+
+
+%% Step 4: compare observed cluster against null distribution
+
+%Determine components satisfying alpha significance threshold
+n_cnt=0; 
+for i=1:length(sz_links)
+    tmp=sum(null_dist>=sz_links(i))/K;
+    if tmp<=STATS{1}.alpha
+        n_cnt=n_cnt+1;
+        ind=find(adj==i);
+        con_mat{n_cnt}=spalloc(N,N,length(ind)*2);
+        con_mat{n_cnt}(ind)=1; 
+        if is_net_undirected
+            con_mat{n_cnt}=triu(con_mat{n_cnt},1);
+        else
+            con_mat{n_cnt} = con_mat{n_cnt} - diag(diag(con_mat{n_cnt}));
+        end
+        pval(n_cnt)=tmp;
+    end
+end
+if n_cnt==0
+    pval=[]; con_mat=[]; 
 end
