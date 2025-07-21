@@ -78,12 +78,8 @@ UI.size.ui = 'Extent'; % measure size of a network component - 'Extent' | 'Inten
 UI.exchange.ui = '';
 
 % pedro
-% UI.design.ui = 1*[is_depressed, ~is_depressed, age, age.^2, sex];
+% UI.design.ui = [is_depressed, ~is_depressed, age, age.^2, sex];
 % contrast = [+1 -1 0 0 0];
-
-% claude
-% UI.design.ui = [ones(nb_subjects, 1), is_depressed, age, age.^2, sex];
-% contrast = [0 +1 0 0 0];
 
 % short
 UI.design.ui = [is_depressed, age, sex];
@@ -126,12 +122,12 @@ NBS_closed_pos = CompositeNBStest({UI})
 UI.contrast.ui = contrast * -1;
 NBS_closed_neg = CompositeNBStest({UI})
 
-% fprintf('Testing difference (closed - open) condition...\n');
-% UI.matrices.ui = mvgc_diff_nets;
-% UI.contrast.ui = contrast;
-% NBS_diff_pos = CompositeNBStest({UI})
-% UI.contrast.ui = contrast * -1;
-% NBS_diff_neg = CompositeNBStest({UI})
+fprintf('Testing difference (closed - open) condition...\n');
+UI.matrices.ui = mvgc_diff_nets;
+UI.contrast.ui = contrast;
+NBS_diff_pos = CompositeNBStest({UI})
+UI.contrast.ui = contrast * -1;
+NBS_diff_neg = CompositeNBStest({UI})
 
 %% Display results
 
@@ -152,26 +148,26 @@ if NBS_closed_pos.n > 0
     fprintf('\n');
 end
 
-% fprintf('\nCondition difference (closed - open, depressed > healthy):\n');
-% fprintf('  Number of significant clusters: %d\n', NBS_diff_pos.n);
-% if NBS_diff_pos.n > 0
-%     fprintf('  P-values: ');
-%     fprintf('%.4f ', NBS_diff_pos.pval);
-%     fprintf('\n');
-% end
+fprintf('\nCondition difference (closed - open, depressed > healthy):\n');
+fprintf('  Number of significant clusters: %d\n', NBS_diff_pos.n);
+if NBS_diff_pos.n > 0
+    fprintf('  P-values: ');
+    fprintf('%.4f ', NBS_diff_pos.pval);
+    fprintf('\n');
+end
 
 fprintf('\nNumber of negative clusters (should be 0):\n');
 fprintf('  Open eyes: %d\n', NBS_open_neg.n);
 fprintf('  Closed eyes: %d\n', NBS_closed_neg.n);
 fprintf('\n=====================================\n');
 
-%%%%%%%%%%%%%%%%%
-
 fprintf('\n');
 fprintf('NBS_open_pos.test_stat:\n');
 disp(NBS_open_pos.test_stat{1});
 fprintf('NBS_closed_pos.test_stat:\n');
 disp(NBS_closed_pos.test_stat{1});
+fprintf('NBS_diff_pos.test_stat:\n');
+disp(NBS_diff_pos.test_stat{1});
 
 significant_connections_open = abs(NBS_open_pos.test_stat{1}) > 1.7;
 fprintf('\nSignificant connections open (|t-statistic| > 1.7):\n');
@@ -180,6 +176,10 @@ disp(significant_connections_open);
 significant_connections_closed = abs(NBS_closed_pos.test_stat{1}) > 1.7;
 fprintf('\nSignificant connections closed (|t-statistic| > 1.7):\n');
 disp(significant_connections_closed);
+
+significant_connections_diff = abs(NBS_diff_pos.test_stat{1}) > 1.7;
+fprintf('\nSignificant connections diff (|t-statistic| > 1.7):\n');
+disp(significant_connections_diff);
 
 % Calculate Cohen's d for each connection
 mean_depressed_open = mean(cat(3, mvgc_open_nets{is_depressed==1}), 3);
@@ -200,26 +200,49 @@ fprintf('\n');
 
 %% Export results
 
-ROI = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
+% ROI = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
 
-% Save significant positive clusters for open eyes condition
-fprintf('\nSaving open eyes condition results...\n');
-T_open = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
-for i=1:5
-  for j=1:5
-    if i == j, continue; end
-    T_open = [T_open; {ROI{i}, ROI{j}, NBS_open_pos.test_stat{1}(i,j), NBS_open_pos.con_mat(i,j)}];
-  end
-end
-writetable(T_open, 'depress_network_results_open.csv');
+% % Save significant positive clusters for open eyes condition
+% fprintf('\nSaving open eyes condition results...\n');
+% T_open = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
+% [nRows, nCols] = size(NBS_open_pos.test_stat{1});
+% for i = 1:nRows
+% 	for j = 1:nCols
+% 		if i == j, continue; end
+% 		T_open = [T_open; {ROI{i}, ROI{j}, NBS_open_pos.test_stat{1}(i,j), NBS_open_pos.con_mat{1}(i,j)}];
+% 	end
+% end
+% if ~isempty(T_open)
+% 	writetable(T_open, 'depress_network_results_open.csv');
+% 	fprintf('Open eyes results saved to depress_network_results_open.csv\n');
+% end
 
-% Save significant positive clusters for closed eyes condition
-fprintf('\nSaving closed eyes condition results...\n');
-T_closed = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
-for i=1:5
-  for j=1:5
-    if i == j, continue; end
-    T_closed = [T_closed; {ROI{i}, ROI{j}, NBS_closed_pos.test_stat{1}(i,j), NBS_closed_pos.con_mat(i,j)}];
-  end
-end
-writetable(T_closed, 'depress_network_results_closed.csv');
+% % Save significant positive clusters for closed eyes condition
+% fprintf('\nSaving closed eyes condition results...\n');
+% T_closed = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
+% [nRows, nCols] = size(NBS_closed_pos.test_stat{1});
+% for i = 1:nRows
+% 	for j = 1:nCols
+% 		if i == j, continue; end
+% 		T_closed = [T_closed; {ROI{i}, ROI{j}, NBS_closed_pos.test_stat{1}(i,j), NBS_closed_pos.con_mat{1}(i,j)}];
+% 	end
+% end
+% if ~isempty(T_closed)
+% 	writetable(T_closed, 'depress_network_results_closed.csv');
+% 	fprintf('Closed eyes results saved to depress_network_results_closed.csv\n');
+% end
+
+% % Save condition difference results
+% fprintf('\nSaving condition difference results...\n');
+% T_diff = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
+% [nRows, nCols] = size(NBS_diff_pos.test_stat{1});
+% for i = 1:nRows
+% 	for j = 1:nCols
+% 		if i == j, continue; end
+% 		T_diff = [T_diff; {ROI{i}, ROI{j}, NBS_diff_pos.test_stat{1}(i,j), NBS_diff_pos.con_mat{1}(i,j)}];
+% 	end
+% end
+% if ~isempty(T_diff)
+% 	writetable(T_diff, 'depress_network_results_diff.csv');
+% 	fprintf('Condition difference results saved to depress_network_results_diff.csv\n');
+% end
