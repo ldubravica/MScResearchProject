@@ -9,8 +9,7 @@ T(T.id == 570, :) = [];
 %% Load MVGC matrices
 
 addpath('./NBS_test/')
-addpath('./NBS_test/NBS1.2/');
-% addpath('./NBS_test/NBS_v1.2/');
+addpath('./NBS_test/NBS_v1.2/');
 [mvgc_open, mvgc_closed, ~, ~] = EEGtoMVGCOptions('brain_source', true);
 
 % Remove 570 due to no age data
@@ -36,35 +35,11 @@ for i = 1:nb_subjects
     mvgc_closed_nets{i} = mvgc_closed.(subject_names{i});
 end
 
-%% Diagnostics - Check MVGC data quality
-
-% fprintf('\n==== MVGC Data Diagnostics ====\n\n');
-
-% fprintf('Number of subjects: %d\n', nb_subjects);
-% fprintf('Depressed subjects: %d\n', sum(is_depressed));
-% fprintf('Healthy subjects: %d\n', sum(~is_depressed));
-
-% fprintf('MVGC data diagnostics:\n');
-% for i = 1:min(3, nb_subjects)  % Check first 3 subjects
-%     fprintf('Subject %d - Open eyes matrix:\n', i);
-%     fprintf('  Min: %.4f, Max: %.4f, Mean: %.4f\n', ...
-%         min(mvgc_open_nets{i}(:)), max(mvgc_open_nets{i}(:)), mean(mvgc_open_nets{i}(:)));
-%     fprintf('  Has NaN: %d, Has Inf: %d\n', ...
-%         any(isnan(mvgc_open_nets{i}(:))), any(isinf(mvgc_open_nets{i}(:))));
-% end
-
-% fprintf('\n===============================\n');
-
 %% Run depression NBS tests
 
 is_depressed = double(T_matched.MDD <= 2);
 age = T_matched.age;
 sex = T_matched.sex - 1;
-
-mvgc_diff_nets = cell([nb_subjects, 1]);
-for i = 1:nb_subjects
-	mvgc_diff_nets{i} = mvgc_closed_nets{i} - mvgc_open_nets{i};
-end
 
 % Initialize UI structure for NBS analysis
 % Default UI structure based on NBS requirements
@@ -122,13 +97,6 @@ NBS_closed_pos = CompositeNBStest({UI})
 UI.contrast.ui = contrast * -1;
 NBS_closed_neg = CompositeNBStest({UI})
 
-fprintf('Testing difference (closed - open) condition...\n');
-UI.matrices.ui = mvgc_diff_nets;
-UI.contrast.ui = contrast;
-NBS_diff_pos = CompositeNBStest({UI})
-UI.contrast.ui = contrast * -1;
-NBS_diff_neg = CompositeNBStest({UI})
-
 %% Display results
 
 fprintf('\n========== RESULTS SUMMARY ==========\n\n');
@@ -145,14 +113,6 @@ fprintf('  Number of significant clusters: %d\n', NBS_closed_pos.n);
 if NBS_closed_pos.n > 0
     fprintf('  P-values: ');
     fprintf('%.4f ', NBS_closed_pos.pval);
-    fprintf('\n');
-end
-
-fprintf('\nCondition difference (closed - open, depressed > healthy):\n');
-fprintf('  Number of significant clusters: %d\n', NBS_diff_pos.n);
-if NBS_diff_pos.n > 0
-    fprintf('  P-values: ');
-    fprintf('%.4f ', NBS_diff_pos.pval);
     fprintf('\n');
 end
 
@@ -177,10 +137,6 @@ significant_connections_closed = abs(NBS_closed_pos.test_stat{1}) > 1.7;
 fprintf('\nSignificant connections closed (|t-statistic| > 1.7):\n');
 disp(significant_connections_closed);
 
-significant_connections_diff = abs(NBS_diff_pos.test_stat{1}) > 1.7;
-fprintf('\nSignificant connections diff (|t-statistic| > 1.7):\n');
-disp(significant_connections_diff);
-
 % Calculate Cohen's d for each connection
 mean_depressed_open = mean(cat(3, mvgc_open_nets{is_depressed==1}), 3);
 mean_healthy_open = mean(cat(3, mvgc_open_nets{is_depressed==0}), 3);
@@ -198,51 +154,90 @@ fprintf('\nCohen''s d for each closed connection:\n');
 disp(cohens_d_closed);
 fprintf('\n');
 
-%% Export results
+%% Plot
 
-% ROI = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
+mvgc_format = 'brain source';
 
-% % Save significant positive clusters for open eyes condition
-% fprintf('\nSaving open eyes condition results...\n');
-% T_open = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
-% [nRows, nCols] = size(NBS_open_pos.test_stat{1});
-% for i = 1:nRows
-% 	for j = 1:nCols
-% 		if i == j, continue; end
-% 		T_open = [T_open; {ROI{i}, ROI{j}, NBS_open_pos.test_stat{1}(i,j), NBS_open_pos.con_mat{1}(i,j)}];
-% 	end
-% end
-% if ~isempty(T_open)
-% 	writetable(T_open, 'depress_network_results_open.csv');
-% 	fprintf('Open eyes results saved to depress_network_results_open.csv\n');
-% end
+plot_mvgc(...
+    {NBS_open_pos.test_stat{1}, NBS_closed_pos.test_stat{1}}, ...
+    {'NBS Open', 'NBS Closed'}, ...
+    sprintf('NBS MVGC T-Values (%s)', strrep(mvgc_format, '_', ' ')), ...
+    [1.7, 1.7]);  % Significance threshold for both matrices
 
-% % Save significant positive clusters for closed eyes condition
-% fprintf('\nSaving closed eyes condition results...\n');
-% T_closed = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
-% [nRows, nCols] = size(NBS_closed_pos.test_stat{1});
-% for i = 1:nRows
-% 	for j = 1:nCols
-% 		if i == j, continue; end
-% 		T_closed = [T_closed; {ROI{i}, ROI{j}, NBS_closed_pos.test_stat{1}(i,j), NBS_closed_pos.con_mat{1}(i,j)}];
-% 	end
-% end
-% if ~isempty(T_closed)
-% 	writetable(T_closed, 'depress_network_results_closed.csv');
-% 	fprintf('Closed eyes results saved to depress_network_results_closed.csv\n');
-% end
+function plot_mvgc(mvgc_matrices, titles, super_title, signif_threshs)
+    plot_data = true;
+    save_plots = true;
+    region_names = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
 
-% % Save condition difference results
-% fprintf('\nSaving condition difference results...\n');
-% T_diff = array2table(zeros([0,4]), 'VariableNames', {'From', 'To', 'Tvalue', 'Significant'});
-% [nRows, nCols] = size(NBS_diff_pos.test_stat{1});
-% for i = 1:nRows
-% 	for j = 1:nCols
-% 		if i == j, continue; end
-% 		T_diff = [T_diff; {ROI{i}, ROI{j}, NBS_diff_pos.test_stat{1}(i,j), NBS_diff_pos.con_mat{1}(i,j)}];
-% 	end
-% end
-% if ~isempty(T_diff)
-% 	writetable(T_diff, 'depress_network_results_diff.csv');
-% 	fprintf('Condition difference results saved to depress_network_results_diff.csv\n');
-% end
+    if ~plot_data
+        return;
+    end
+
+    if nargin < 4
+        signif_threshs = [];
+    end
+
+    % Find global color limits
+    num_matrices = numel(mvgc_matrices);
+    mat_size = numel(mvgc_matrices{1});
+    all_vals = zeros(num_matrices * mat_size, 1);
+    for i = 1:num_matrices
+        idx_start = (i-1)*mat_size + 1;
+        idx_end = i*mat_size;
+        all_vals(idx_start:idx_end) = mvgc_matrices{i}(:);
+    end
+    clim = [min(all_vals), max(all_vals)];
+
+    figure;
+    for i = 1:numel(mvgc_matrices)
+        if numel(mvgc_matrices) == 2
+            subplot(1, 2, i)
+        end
+        if numel(mvgc_matrices) == 4
+            subplot(2, 2, i)
+        end
+        if numel(mvgc_matrices) == 6
+            subplot(2, 3, i)
+        end
+        imagesc(mvgc_matrices{i}, clim);
+        colorbar;
+        title(titles{i});
+        set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
+                    'YTick', 1:length(region_names), 'YTickLabel', region_names);
+        xlabel('To Region');
+        ylabel('From Region');
+        axis square;
+
+        % Write the values in the center of each cell
+        for r = 1:length(region_names)
+            for c = 1:length(region_names)
+                text(c, r, sprintf('%.3f', mvgc_matrices{i}(r, c)), ...
+                        'Color', 'k', 'FontSize', 14, 'HorizontalAlignment', 'center');
+            end
+        end
+
+        % Mark significant differences with stars
+        if ~isempty(signif_threshs)
+            hold on;
+            for r = 1:length(region_names)
+                for c = 1:length(region_names)
+                    if abs(mvgc_matrices{i}(r, c)) >= signif_threshs(i)
+                        % Place the star slightly above center (y-0.25)
+                        text(c, r-0.1, '*', 'Color', 'k', 'FontSize', 14, 'HorizontalAlignment', 'center');
+                    end
+                end
+            end
+        end
+    end
+    sgtitle(super_title);
+
+    if (save_plots)
+        if ~exist(fullfile('output', 'images'), 'dir')
+            mkdir(fullfile('output', 'images'));
+        end
+        filename = sprintf('%s - %s.png', super_title, datetime('now', 'Format', 'yyyy_MM_dd'));
+        saveas(gcf, fullfile('output', 'images', filename));
+        % close(gcf);  % Close the figure after saving
+    end
+    
+end
