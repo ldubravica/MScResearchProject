@@ -79,6 +79,7 @@ def copy_filter(kf, prior_factor=1, likelihood_factor=1):
                      em_vars = ['transition_matrices','observation_matrices'])
     return f
 
+
 def butter_bandpass(lowcut, highcut, fs, order=1):
     nyq = 0.5 * fs
     low = lowcut / nyq
