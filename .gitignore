@@ -27,6 +27,8 @@ lz76/*
 !lz76/lz76.pyx
 !lz76/setup.py
 
+pyNuMIT/*
+
 NBS_test/NBS_v1.2
 
 output/
