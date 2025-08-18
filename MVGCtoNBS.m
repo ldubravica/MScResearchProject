@@ -8,9 +8,12 @@ T(T.id == 570, :) = [];
 
 %% Load MVGC matrices
 
+mvgc_format = 'brain_source';  % 'source' | 'brain source' | 'pca' | 'region'
+save_plots = false;
+
 addpath('./NBS_test/')
 addpath('./NBS_test/NBS_v1.2/');
-[mvgc_open, mvgc_closed, ~, ~] = EEGtoMVGCOptions('brain_source', true);
+[mvgc_open, mvgc_closed, ~, ~] = EEGtoMVGCOptions(mvgc_format, true, false, true, false);
 
 % Remove 570 due to no age data
 mvgc_open = rmfield(mvgc_open, 'x570');
@@ -126,8 +129,6 @@ fprintf('NBS_open_pos.test_stat:\n');
 disp(NBS_open_pos.test_stat{1});
 fprintf('NBS_closed_pos.test_stat:\n');
 disp(NBS_closed_pos.test_stat{1});
-fprintf('NBS_diff_pos.test_stat:\n');
-disp(NBS_diff_pos.test_stat{1});
 
 significant_connections_open = abs(NBS_open_pos.test_stat{1}) > 1.7;
 fprintf('\nSignificant connections open (|t-statistic| > 1.7):\n');
@@ -156,13 +157,13 @@ fprintf('\n');
 
 %% Plot
 
-mvgc_format = 'brain source';
+disp(NBS_open_pos);
 
 plot_mvgc(...
-    {NBS_open_pos.test_stat{1}, NBS_closed_pos.test_stat{1}}, ...
-    {'NBS Open', 'NBS Closed'}, ...
-    sprintf('NBS MVGC T-Values (%s)', strrep(mvgc_format, '_', ' ')), ...
-    [1.7, 1.7]);  % Significance threshold for both matrices
+    {NBS_open_pos.test_stat{1}, NBS_closed_pos.test_stat{1}, NBS_open_pos.test_stat{1}, NBS_closed_pos.test_stat{1}}, ...
+    {'Open NBS T-Values', 'Closed NBS T-Values', 'Open NBS T-Values', 'Closed NBS T-Values'}, ...
+    sprintf('MVGC NBS-Corrected T-Values (method: %s)', strrep(mvgc_format, '_', '-')), ...
+    [1.7, 1.7, 1.7, 1.7]);  % Significance threshold for both matrices
 
 function plot_mvgc(mvgc_matrices, titles, super_title, signif_threshs)
     plot_data = true;
@@ -212,7 +213,7 @@ function plot_mvgc(mvgc_matrices, titles, super_title, signif_threshs)
         for r = 1:length(region_names)
             for c = 1:length(region_names)
                 text(c, r, sprintf('%.3f', mvgc_matrices{i}(r, c)), ...
-                        'Color', 'k', 'FontSize', 14, 'HorizontalAlignment', 'center');
+                        'Color', 'k', 'FontSize', 10, 'HorizontalAlignment', 'center');
             end
         end
 
