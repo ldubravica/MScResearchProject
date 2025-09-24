@@ -13,7 +13,7 @@ save_plots = false;
 
 addpath('./NBS_test/')
 addpath('./NBS_test/NBS_v1.2/');
-[mvgc_open, mvgc_closed, ~, ~] = EEGtoMVGCOptions(mvgc_format, true, false, true, false);
+[mvgc_open, mvgc_closed, ~, ~] = EEGtoMVGCOptions(mvgc_format, true, false, false, false);
 
 % Remove 570 due to no age data
 mvgc_open = rmfield(mvgc_open, 'x570');
@@ -160,15 +160,18 @@ fprintf('\n');
 disp(NBS_open_pos);
 
 plot_mvgc(...
-    {NBS_open_pos.test_stat{1}, NBS_closed_pos.test_stat{1}, NBS_open_pos.test_stat{1}, NBS_closed_pos.test_stat{1}}, ...
-    {'Open NBS T-Values', 'Closed NBS T-Values', 'Open NBS T-Values', 'Closed NBS T-Values'}, ...
+    {NBS_open_pos.test_stat{1}, NBS_closed_pos.test_stat{1}}, ...
+    {'MVGC T-Values (open-eyes)', 'MVGC T-Values (closed-eyes)'}, ...
     sprintf('MVGC NBS-Corrected T-Values (method: %s)', strrep(mvgc_format, '_', '-')), ...
-    [1.7, 1.7, 1.7, 1.7]);  % Significance threshold for both matrices
+    [1.7, 1.7]);  % Significance threshold for both matrices
 
 function plot_mvgc(mvgc_matrices, titles, super_title, signif_threshs)
     plot_data = true;
     save_plots = true;
     region_names = {'Frontal', 'Occipital', 'Parietal', 'Sensorimotor', 'Temporal'};
+
+    title_font_size = 26;
+    font_size = 22;
 
     if ~plot_data
         return;
@@ -202,18 +205,19 @@ function plot_mvgc(mvgc_matrices, titles, super_title, signif_threshs)
         end
         imagesc(mvgc_matrices{i}, clim);
         colorbar;
-        title(titles{i});
+        title(titles{i}, 'FontSize', title_font_size);
         set(gca, 'XTick', 1:length(region_names), 'XTickLabel', region_names, ...
-                    'YTick', 1:length(region_names), 'YTickLabel', region_names);
-        xlabel('To Region');
-        ylabel('From Region');
+                    'YTick', 1:length(region_names), 'YTickLabel', region_names, ...
+                    'FontSize', font_size);
+        xlabel('To Region', 'FontSize', font_size);
+        ylabel('From Region', 'FontSize', font_size);
         axis square;
 
         % Write the values in the center of each cell
         for r = 1:length(region_names)
             for c = 1:length(region_names)
-                text(c, r, sprintf('%.3f', mvgc_matrices{i}(r, c)), ...
-                        'Color', 'k', 'FontSize', 10, 'HorizontalAlignment', 'center');
+                text(c, r, sprintf('%.2f', mvgc_matrices{i}(r, c)), ...
+                        'Color', 'k', 'FontSize', 20, 'HorizontalAlignment', 'center');
             end
         end
 
@@ -224,13 +228,13 @@ function plot_mvgc(mvgc_matrices, titles, super_title, signif_threshs)
                 for c = 1:length(region_names)
                     if abs(mvgc_matrices{i}(r, c)) >= signif_threshs(i)
                         % Place the star slightly above center (y-0.25)
-                        text(c, r-0.1, '*', 'Color', 'k', 'FontSize', 14, 'HorizontalAlignment', 'center');
+                        text(c, r-0.2, '*', 'Color', 'k', 'FontSize', title_font_size, 'HorizontalAlignment', 'center');
                     end
                 end
             end
         end
     end
-    sgtitle(super_title);
+    sgtitle(super_title, 'FontSize', 30);
 
     if (save_plots)
         if ~exist(fullfile('output', 'images'), 'dir')
