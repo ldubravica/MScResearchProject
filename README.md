@@ -1,23 +1,33 @@
-### Phase One: Depression_Study\phase_one_raw.ipynb
+### 1. Preprocessing
 
-**Input:** depression EEG study files - Depression_Study\depression_data\matlab_files\XXX_Depression_REST.mat
+**Code:** Depression_Study\phase_one_raw.ipynb
 
-**Function:** preprocceses the EEG in Python
+Preprocceses the raw EEG data in Python. Produces clean and filtered EEG per subject in *Depression_Study\export_mat\XXX_Depression_REST_processed.mat*.
 
-**Output:** clean and filtered EEG per subject - Depression_Study\export_mat\XXX_Depression_REST_processed.mat
+### 2. Source Reconstruction & CSER Calculation
 
-### Phase Two: EEGtoCSER.m
+**Code:** EEGtoCSER.m
 
-**Input:** preprocessed EEG files - Depression_Study\export_mat\XXX_Depression_REST_processed.mat
+Performs source reconstruction and CSER calculations in MATLAB on the electrode-based preprocessed EEG. Produces CSER values per subject / source / band in *cser_values.mat*.
 
-**Function:** performs source reconstruction and CSER calculation in MatLab
+### 3. Complexity & PSD Analysis 
 
-**Output:** CSER values per subject / source / band - cser_values.mat (as well as source reconstructed EEG)
+**Code:** analyse_cser.ipynb, analyse_lzc.ipynb, analyse_psd.ipynb
 
-### Phase Three: analyse_cser.ipynb, analyse_lzc.ipynb, analyse_psd.ipynb
+Analyses CSER results and performs LZC and PSD (power spectral density) calculations in Python. Produces significant observations and graphs for CSER, LZC and PSD in depressed subjects vs healthy control.
 
-**Input:** CSER values (cser_values.mat) or reconstructed EEG source (eeg_source.mat)
+### 4. Transfer Entropy Analysis
 
-**Function:** analyses CSER results and perform LZC and PSD calculations in Python
+**Code:** EEGtoMVGC.m (and related files)
 
-**Output:** significant observations regarding CSER, LZC and PSD in depression vs control
+Perform transfer entropy analysis using four different methods and various correction methods.
+
+### 5. Predictive Processing Simulations
+
+**Code:** analyse_pp.ipynb
+
+Model and simulate predictive processing models of a depressed brain based on healthy data.
+
+### TO-DO
+
+The code is aimed to be cleaned up, further separated and grouped into units, and turned into a library for easier reusability.
